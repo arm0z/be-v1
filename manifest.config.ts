@@ -29,4 +29,5 @@ export default defineManifest({
   side_panel: {
     default_path: 'src/popup/index.html',
   },
+  options_page: 'src/dev/index.html',
 })
