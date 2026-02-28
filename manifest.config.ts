@@ -17,6 +17,10 @@ export default defineManifest({
   permissions: [
     'sidePanel',
     'contentSettings',
+    'tabs',
+    'webNavigation',
+    'idle',
+    'downloads',
   ],
   background: {
     service_worker: 'src/background/main.ts',

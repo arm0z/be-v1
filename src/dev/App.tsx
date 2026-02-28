@@ -5,12 +5,13 @@ import { FilterToggles } from "./panels/FilterToggles";
 import { GraphView } from "./panels/GraphView";
 import { LogStream } from "./panels/LogStream";
 import { StateInspector } from "./panels/StateInspector";
+import { useDevPort } from "./useDevPort";
 
 const tabs = [
-	{ id: "graph", label: "Graph", icon: GitGraph, panel: GraphView },
-	{ id: "logs", label: "Logs", icon: ScrollText, panel: LogStream },
-	{ id: "state", label: "State", icon: Variable, panel: StateInspector },
-	{ id: "filters", label: "Filters", icon: SlidersHorizontal, panel: FilterToggles },
+	{ id: "graph", label: "Graph", icon: GitGraph },
+	{ id: "logs", label: "Logs", icon: ScrollText },
+	{ id: "state", label: "State", icon: Variable },
+	{ id: "filters", label: "Filters", icon: SlidersHorizontal },
 ] as const;
 
 function useHashTab() {
@@ -33,7 +34,8 @@ function useHashTab() {
 
 export default function App() {
 	const active = useHashTab();
-	const ActivePanel = tabs.find((t) => t.id === active)!.panel;
+	const { entries, filter, setChannelFilter, setEventFilter, clear } =
+		useDevPort();
 
 	return (
 		<div className="flex h-screen flex-col bg-background text-foreground">
@@ -54,8 +56,18 @@ export default function App() {
 					</a>
 				))}
 			</nav>
-			<div className="flex-1 overflow-auto p-4">
-				<ActivePanel />
+			<div className={cn("flex-1", active === "logs" ? "overflow-hidden" : "overflow-auto p-4")}>
+				{active === "graph" && <GraphView />}
+				{active === "logs" && (
+					<LogStream entries={entries} onClear={clear} />
+				)}
+				{active === "state" && <StateInspector />}
+				{active === "filters" && (
+					<FilterToggles
+						filter={filter}
+						setEventFilter={setEventFilter}
+					/>
+				)}
 			</div>
 		</div>
 	);

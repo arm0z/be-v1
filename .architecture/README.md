@@ -20,7 +20,7 @@
 │  │   events     inject / snap    dedup             port              │  │
 │  │                                                                   │  │
 │  │   ◀──────── Capture ────────▶                   ◀── Teardown ───▶ │  │
-│  │   { kind, context, timestamp, payload }          () => void       │  │
+│  │   { type, ts, context, payload }                  () => void      │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
 │  ┌─ SPA Observer (optional) ─────────────────────────────────────────┐  │
@@ -38,25 +38,26 @@ Lifecycle:
 
 ### Event Layer Files
 
-| File | Role |
-| ---- | ---- |
-| [`src/event/types.ts`](../src/event/types.ts) | All Event Layer type definitions: `Capture`, `Teardown`, `Tap`, `Adapter`, `Normalizer`, `Relay`, `Route`. |
-| [`src/event/tap.ts`](../src/event/tap.ts) | Base Tap implementation. Hooks into DOM `click`, `keydown`, `scroll` events and streams `Capture` records to a sink. |
-| [`src/event/adapters/html.ts`](../src/event/adapters/html.ts) | HTML snapshot Adapter. Wraps a Tap and injects periodic `viewport.snapshot` Captures, deduped by content hash. |
-| [`src/event/adapters/outlook.ts`](../src/event/adapters/outlook.ts) | Outlook Adapter. Filters out Captures from transient routes (e.g. email list between two emails). |
-| [`src/event/adapters/file.ts`](../src/event/adapters/file.ts) | File Adapter. Reads `file://` page text content and emits a `file.content` Capture on pipeline start. |
-| [`src/event/normalizer.ts`](../src/event/normalizer.ts) | Keystroke batching Normalizer. Buffers rapid `keydown` Captures and flushes them as a single `typing` Capture after 1 s of inactivity. |
-| [`src/event/relay.ts`](../src/event/relay.ts) | Terminal Relay. Forwards every Capture to the service worker via `chrome.runtime.sendMessage`. |
-| [`src/event/registry.ts`](../src/event/registry.ts) | Route registry. Ordered list of `Route` objects — Outlook, file://, and a catch-all generic web pipeline. First match wins. |
-| [`src/event/spa-observer.ts`](../src/event/spa-observer.ts) | SPA navigation observer. Monkey-patches `history.pushState`/`replaceState` and listens for `popstate` to detect client-side route changes. |
-| [`src/event/dev.ts`](../src/event/dev.ts) | Dev logging utility. Structured `dev.log(channel, event, message, data)` — no-op in production (tree-shaken out), sends logs to service worker in dev mode. |
-| [`src/content/main.ts`](../src/content/main.ts) | Content script bootstrap. Entry point injected on every page. Reads the URL, matches against the registry, builds the pipeline, and installs the SPA observer if needed. |
+| File                                                                | Role                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`src/event/types.ts`](../src/event/types.ts)                       | Discriminated union type system. Defines `Capture` (content-script pipeline, 14 event types), `SessionEvent` (full stamped, 28 event types), shared target types (`ClickTarget`, `KeystrokeTarget`, `FormTarget`), per-layer payload interfaces, and pipeline types (`Tap`, `Adapter`, `Normalizer`, `Relay`, `Route`).                                                                                                          |
+| [`src/event/tap.ts`](../src/event/tap.ts)                           | Base Tap. Hooks 14 DOM listeners (`keydown`, `compositionstart/update/end`, `click`, `auxclick`, `dblclick`, `contextmenu`, `scroll`, `selectionchange`, `copy`, `paste`, `focusin`, `change`, `submit`) via a single `AbortController`. Builds fully typed `Capture` payloads. Redacts sensitive fields (passwords, credit cards, SSNs).                                                                                        |
+| [`src/event/adapters/html.ts`](../src/event/adapters/html.ts)       | HTML snapshot Adapter. Exports `SNAPSHOT_VIEWPORT` const and uses `SnapshotViewportPayload`. Injects periodic `snapshot.viewport` Captures every 60 s, deduped by content hash.                                                                                                                                                                                                                                                  |
+| [`src/event/adapters/outlook.ts`](../src/event/adapters/outlook.ts) | Outlook Adapter. Filters out Captures from transient routes (e.g. email list between two emails).                                                                                                                                                                                                                                                                                                                                |
+| [`src/event/adapters/file.ts`](../src/event/adapters/file.ts)       | File Adapter. Exports `FILE_CONTENT` const and `FileContentPayload`. Reads `file://` page text and emits a `file.content` Capture on pipeline start.                                                                                                                                                                                                                                                                             |
+| [`src/event/normalizer.ts`](../src/event/normalizer.ts)             | Composable normalizer factory. Four individual normalizers: `keystrokeNormalizer` (batches printable keys, flushes after 1 s idle, flushes on IME composition start), `scrollNormalizer` (debounces 150 ms), `selectionNormalizer` (debounces 300 ms, drops empty), `formFocusNormalizer` (deduplicates rapid re-focus within same form). `normalizerFactory(opts)` composes them; `normalizer` is the default with all enabled. |
+| [`src/event/relay.ts`](../src/event/relay.ts)                       | Terminal Relay. Forwards every Capture to the service worker via `chrome.runtime.sendMessage({ type: "capture", payload })`.                                                                                                                                                                                                                                                                                                     |
+| [`src/event/registry.ts`](../src/event/registry.ts)                 | Route registry. Ordered list of `Route` objects — Outlook, file://, and a catch-all generic web pipeline. First match wins.                                                                                                                                                                                                                                                                                                      |
+| [`src/event/spa-observer.ts`](../src/event/spa-observer.ts)         | SPA navigation observer. Monkey-patches `history.pushState`/`replaceState` and listens for `popstate` to detect client-side route changes.                                                                                                                                                                                                                                                                                       |
+| [`src/event/dev.ts`](../src/event/dev.ts)                           | Dev logging utility. Structured `dev.log(channel, event, message, data)` — no-op in production (tree-shaken out), sends `{ type: "dev:log", entry }` to service worker in dev mode.                                                                                                                                                                                                                                              |
+| [`src/content/main.ts`](../src/content/main.ts)                     | Content script bootstrap. Entry point injected on `<all_urls>`. Reads the URL, matches against the registry, builds the pipeline, and installs the SPA observer if needed.                                                                                                                                                                                                                                                       |
+| [`src/background/main.ts`](../src/background/main.ts)               | Service worker. Receives `type: "capture"` messages, logs with source/tabId. In dev mode, runs the **DevHub**: receives `dev:log` messages, filters by channel/event, stores in 10k-entry ring buffer, broadcasts to connected dev pages via ports, and logs to the service worker console.                                                                                                                                      |
 
 ### Event Glossary
 
 | Term           | What it is                                                                                                                                   | Type signature                             |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| **Capture**    | A single normalized event record flowing through the pipeline.                                                                               | `{ kind, context, timestamp, payload }`    |
+| **Capture**    | A single typed event record flowing through the content-script pipeline. Discriminated union on `type`.                                      | `{ type, ts, context, payload }`           |
 | **Tap**        | The base layer. Hooks into the DOM and produces a stream of Captures. Returns a Teardown.                                                    | `(sink: (c: Capture) => void) => Teardown` |
 | **Adapter**    | Domain-specific middleware. Wraps a Tap to inject, filter, or transform Captures (e.g. HTML snapshots, Outlook email parsing, file reading). | `(inner: Tap) => Tap`                      |
 | **Normalizer** | Event-aggregation middleware. Wraps a Tap to deduplicate or batch Captures (e.g. keystroke batching). Same shape as Adapter.                 | `(inner: Tap) => Tap`                      |
@@ -88,77 +89,77 @@ The Relay sends Captures to the service worker. The Normalizer aggregates events
 
 ### Event Types — [`src/event/types.ts`](../src/event/types.ts)
 
+Events are a discriminated union keyed on `type`. Two levels:
+
+- **`BaseCapture<T, P>`** — content-script pipeline (no `tabId`/`windowId`/`source` yet): `{ type, ts, context, payload }`
+- **`BaseEvent<T, P>`** — full stamped event (service worker adds `tabId`, `windowId`, `source`)
+- **`Capture`** — union of `BaseCapture` variants (14 content-script event types)
+- **`SessionEvent`** — union of `BaseEvent` variants (28 total event types, including service-worker-only events)
+
+Shared target types: `KeystrokeTarget`, `ClickTarget`, `FormTarget`, `Bounds`, `FormFieldInfo`.
+
+Events by layer:
+
+| Layer         | Event types                                                                                                      | Source                                                          |
+| ------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| 1. Session    | `window.created`, `window.closed`, `window.resized`, `tab.created`, `tab.closed`, `tab.moved`, `tab.transferred` | Service worker (`chrome.windows.*`, `chrome.tabs.*`)            |
+| 2. Navigation | `nav.completed`, `nav.spa`, `nav.title_changed`                                                                  | Service worker (`chrome.webNavigation.*`)                       |
+| 3. Attention  | `attention.active`, `attention.visible`, `attention.mouse_presence`, `attention.idle`                            | Service worker (`chrome.tabs.onActivated`, `chrome.idle.*`)     |
+| 4. Keystrokes | `input.keystroke`, `input.composition`                                                                           | Content script (`keydown`, `composition*`)                      |
+| 5. Mouse      | `input.click`, `input.double_click`, `input.context_menu`                                                        | Content script (`click`, `auxclick`, `dblclick`, `contextmenu`) |
+| 6. Scroll     | `input.scroll`                                                                                                   | Content script (`scroll`)                                       |
+| 7. Clipboard  | `input.selection`, `input.copy`, `input.paste`                                                                   | Content script (`selectionchange`, `copy`, `paste`)             |
+| 8. Forms      | `input.form_focus`, `input.form_change`, `input.form_submit`                                                     | Content script (`focusin`, `change`, `submit`)                  |
+| 9. Media      | `media.audio`, `media.download`                                                                                  | Service worker (`chrome.tabs.onUpdated`, `chrome.downloads.*`)  |
+| 10. Snapshots | `snapshot.viewport`                                                                                              | HTML Adapter                                                    |
+| Adapter       | `file.content`                                                                                                   | File Adapter                                                    |
+
 ```typescript
-// ── Primitives ──────────────────────────────────────────────
-
-type Capture = {
-  kind: string;          // e.g. "click", "keydown", "viewport.snapshot"
-  context: string;       // e.g. "root", "dashboard", "ffa931"
-  timestamp: number;
-  payload: Record<string, unknown>;
-};
-
-type Teardown = () => void;
-
 // ── Pipeline stages ─────────────────────────────────────────
 
-/** Base layer. Hooks into the DOM and streams Captures to a sink. */
+type Teardown = () => void;
 type Tap = (sink: (capture: Capture) => void) => Teardown;
-
-/** Middleware. Wraps a Tap, may inject/filter/transform Captures. */
 type Adapter = (inner: Tap) => Tap;
-
-/** Middleware. Wraps a Tap, aggregates/deduplicates Captures. */
 type Normalizer = (inner: Tap) => Tap;
-
-/** Terminal. Wraps a Tap, forwards Captures to the service worker. */
 type Relay = (inner: Tap) => Teardown;
 ```
 
 ### Example: Generic HTML Pipeline — [`src/event/tap.ts`](../src/event/tap.ts) + [`src/event/adapters/html.ts`](../src/event/adapters/html.ts)
 
-A Tap that listens for clicks, keypresses, and scrolls, wrapped with an Adapter that takes an HTML snapshot every 60 seconds:
+A Tap that hooks all DOM listeners via a single AbortController, wrapped with an Adapter that injects periodic HTML snapshots (deduped by content hash):
 
 ```typescript
-/** Base Tap: attaches DOM listeners and streams Captures. */
-function tap(): Tap {
+/** Base Tap: attaches DOM listeners and streams all content-script Captures. */
+function tap(context = "root"): Tap {
   return (sink) => {
-    const handle = (kind: string) => (e: Event) => {
-      sink({ kind, context: "root", timestamp: Date.now(), payload: {} });
-    };
+    const ac = new AbortController();
+    const { signal } = ac;
+    const capture = { capture: true, signal } as const;
+    const passive = { passive: true, signal } as const;
 
-    const onClick = handle("click");
-    const onKeydown = handle("keydown");
-    const onScroll = handle("scroll");
+    document.addEventListener("click", (e) => {
+      const target = e.target instanceof Element ? e.target : null;
+      sink({
+        type: "input.click",
+        ts: Date.now(),
+        context,
+        payload: { x: e.clientX, y: e.clientY, button: e.button, target: clickTarget(target) },
+      });
+    }, capture);
 
-    document.addEventListener("click", onClick);
-    document.addEventListener("keydown", onKeydown);
-    document.addEventListener("scroll", onScroll, { passive: true });
+    document.addEventListener("keydown", (e) => { /* ... */ }, capture);
+    document.addEventListener("scroll", () => { /* ... */ }, passive);
+    // ... 14 DOM listeners total, all cleaned up by AbortController
 
-    return () => {
-      document.removeEventListener("click", onClick);
-      document.removeEventListener("keydown", onKeydown);
-      document.removeEventListener("scroll", onScroll);
-    };
+    return () => ac.abort();
   };
 }
 
 /** Adapter: wraps any Tap and injects periodic HTML snapshots (deduped). */
-function htmlAdapter(inner: Tap): Tap {
+const htmlAdapter: Adapter = (inner) => {
   return (sink) => {
-    const teardownInner = inner(sink);
-
-    // ── pipeline memory: lives in the closure ──
     let lastHash: string | null = null;
-    let lastClickTarget: string | null = null;
-
-    // intercept inner Captures to track state
-    const teardownInnerWithMemory = inner((capture) => {
-      if (capture.kind === "click") {
-        lastClickTarget = capture.payload.target as string;
-      }
-      sink(capture);
-    });
+    const teardownInner = inner(sink);
 
     // periodic snapshot, skipped if nothing changed
     const interval = setInterval(() => {
@@ -167,19 +168,26 @@ function htmlAdapter(inner: Tap): Tap {
       if (hash === lastHash) return;
       lastHash = hash;
       sink({
-        kind: "viewport.snapshot",
+        type: "snapshot.viewport",
+        ts: Date.now(),
         context: "root",
-        timestamp: Date.now(),
-        payload: { html, lastClickTarget },
+        payload: {
+          generator: "htmlAdapter",
+          trigger: "mutation",
+          url: window.location.href,
+          title: document.title,
+          viewport: { width: innerWidth, height: innerHeight, scrollY, scrollPercent },
+          content: html,
+        } satisfies SnapshotViewportPayload,
       });
     }, 60_000);
 
     return () => {
       clearInterval(interval);
-      teardownInnerWithMemory();
+      teardownInner();
     };
   };
-}
+};
 ```
 
 Usage — the full generic web pipeline (composed in [`src/event/registry.ts`](../src/event/registry.ts)):
@@ -194,28 +202,32 @@ The Adapter calls `inner(sink)` to pass the sink through, then adds its own Capt
 
 Because the Adapter wraps the sink, it has full control over what gets forwarded — it can drop, buffer, delay, or transform any Capture. This is useful for SPAs where intermediate routes (e.g. a list view between two emails) shouldn't emit events.
 
-Consider Outlook navigating: `/email/id1` → `/email` → `/email/id2`. The middle URL is the email list — transient, not interesting. The Adapter can gate on the current URL:
+Consider Outlook navigating: `/mail/id1` → `/mail/` → `/mail/id2`. The middle URL is the email list — transient, not interesting. The Adapter can gate on the current URL:
 
 ```typescript
-/** Adapter: filters out transient routes, emits email-specific snapshots. */
-function outlookAdapter(inner: Tap): Tap {
+/** Adapter: filters out transient routes, only forwards events on specific email views. */
+const outlookAdapter: Adapter = (inner) => {
   return (sink) => {
-    const isEmailView = () => /\/email\/.+/.test(window.location.pathname);
+    const isEmailView = () =>
+      /\/mail\//.test(window.location.pathname) &&
+      window.location.pathname !== "/mail/";
 
     const teardownInner = inner((capture) => {
-      // drop all events when not viewing a specific email
-      if (!isEmailView()) return;
+      if (!isEmailView()) {
+        dev.log("adapter", "filtered", "dropped capture (transient route)", { type: capture.type });
+        return;
+      }
       sink(capture);
     });
 
     return teardownInner;
   };
-}
+};
 ```
 
 This works because SPA navigation doesn't rebuild the pipeline (same Route matches), so the Adapter stays alive across all three URL changes. The Tap underneath keeps firing DOM events — the Adapter just decides which ones reach the sink.
 
-The same pattern applies to any filtering logic: ignore certain event kinds, suppress events during loading states, throttle high-frequency events, etc. The sink is just a callback — intercepting it is the entire mechanism.
+The same pattern applies to any filtering logic: ignore certain event types, suppress events during loading states, throttle high-frequency events, etc. The sink is just a callback — intercepting it is the entire mechanism.
 
 ### Pipeline Memory
 
@@ -916,19 +928,19 @@ export const dev = { log: createDevLog() };
 Usage in a Tap:
 
 ```typescript
-function tap(): Tap {
+function tap(context = "root"): Tap {
   return (sink) => {
-    const onClick = (e: Event) => {
-      const capture = { kind: "click", context: "root", timestamp: Date.now(), payload: {} };
-      dev.log("tap", "click", "click event", capture);
-      sink(capture);
-    };
-    const onScroll = (e: Event) => {
-      const capture = { kind: "scroll", context: "root", timestamp: Date.now(), payload: {} };
-      dev.log("tap", "scroll", "scroll event", capture);
-      sink(capture);
-    };
-    // ...
+    document.addEventListener("click", (e) => {
+      const cap: Capture = {
+        type: "input.click",
+        ts: Date.now(),
+        context,
+        payload: { x: e.clientX, y: e.clientY, button: e.button, target: clickTarget(e.target) },
+      };
+      dev.log("tap", "input.click", "click event", cap);
+      sink(cap);
+    }, capture);
+    // ... 14 listeners total
   };
 }
 ```
@@ -951,7 +963,7 @@ function transition(to: string): void {
 // ── Only runs in dev mode ───────────────────────────────────
 
 if (import.meta.env.DEV) {
-  const LOG_BUFFER_SIZE = 500;
+  const LOG_BUFFER_SIZE = 10_000;
   const logs: DevEntry[] = [];
   const ports: Set<chrome.runtime.Port> = new Set();
 
