@@ -56,8 +56,8 @@ export default function App() {
 					</a>
 				))}
 			</nav>
-			<div className={cn("flex-1", active === "logs" ? "overflow-hidden" : "overflow-auto p-4")}>
-				{active === "graph" && <GraphView />}
+			<div className={cn("flex-1", active === "logs" || active === "graph" ? "overflow-hidden" : "overflow-auto p-4")}>
+				{active === "graph" && <GraphView entries={entries} />}
 				{active === "logs" && (
 					<LogStream entries={entries} onClear={clear} />
 				)}

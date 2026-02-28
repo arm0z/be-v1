@@ -77,6 +77,14 @@ const EVENT_GROUPS: { label: string; events: string[] }[] = [
 		label: "ADAPTERS",
 		events: ["html.content", "file.content"],
 	},
+	{
+		label: "AGGREGATOR",
+		events: ["bundle.opened", "bundle.sealed", "transition"],
+	},
+	{
+		label: "GRAPH",
+		events: ["edge.created", "edge.incremented"],
+	},
 ];
 
 const ALL_EVENTS = EVENT_GROUPS.flatMap((g) => g.events);

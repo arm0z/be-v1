@@ -1,6 +1,9 @@
-import type { Capture } from "../event/types.ts";
+import type { Capture, Signal } from "../event/types.ts";
 import type { DevChannel, DevEntry } from "../event/dev.ts";
 import { dev } from "../event/dev.ts";
+import { createAggregator } from "../aggregation/index.ts";
+
+const aggregator = createAggregator();
 
 // ── Receive Captures from the Event Layer (port-based) ──────
 
@@ -19,15 +22,7 @@ chrome.runtime.onConnect.addListener((port) => {
             );
             return;
         }
-        const source = `${capture.context}@${tabId}`;
-
-        console.log(
-            `[${capture.type}]`,
-            `source:${source}`,
-            `tab:${tabId}`,
-            capture.timestamp,
-            capture.payload,
-        );
+        aggregator.ingest(capture, tabId);
     });
 });
 
@@ -60,11 +55,16 @@ chrome.windows.onBoundsChanged.addListener((window) => {
 });
 
 chrome.tabs.onCreated.addListener((tab) => {
+    const tabId = String(tab.id ?? "unknown");
     dev.log("tap", "tab.created", "tab created", {
         url: tab.url ?? "",
         title: tab.title ?? "",
         openerTabId: tab.openerTabId ? String(tab.openerTabId) : undefined,
     });
+    aggregator.ingestSignal(
+        { type: "tab.created", timestamp: Date.now(), payload: { url: tab.url ?? "", title: tab.title ?? "", openerTabId: tab.openerTabId ? String(tab.openerTabId) : undefined } },
+        tabId,
+    );
 });
 
 chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
@@ -73,6 +73,10 @@ chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
         windowId: removeInfo.windowId,
         isWindowClosing: removeInfo.isWindowClosing,
     });
+    aggregator.ingestSignal(
+        { type: "tab.closed", timestamp: Date.now(), payload: { windowId: removeInfo.windowId, isWindowClosing: removeInfo.isWindowClosing } },
+        String(tabId),
+    );
 });
 
 chrome.tabs.onMoved.addListener((tabId, moveInfo) => {
@@ -107,6 +111,10 @@ chrome.webNavigation.onCompleted.addListener((details) => {
             title: tab?.title ?? "",
             transitionType: "",
         });
+        aggregator.ingestSignal(
+            { type: "nav.completed", timestamp: Date.now(), payload: { url: details.url, title: tab?.title ?? "", transitionType: "" } },
+            String(details.tabId),
+        );
     });
 });
 
@@ -117,15 +125,23 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
             url: details.url,
             title: tab?.title ?? "",
         });
+        aggregator.ingestSignal(
+            { type: "nav.spa", timestamp: Date.now(), payload: { url: details.url, title: tab?.title ?? "" } },
+            String(details.tabId),
+        );
     });
 });
 
-chrome.tabs.onUpdated.addListener((_, changeInfo, tab) => {
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.title) {
         dev.log("tap", "nav.title_changed", "title changed", {
             title: changeInfo.title,
             url: tab.url ?? "",
         });
+        aggregator.ingestSignal(
+            { type: "nav.title_changed", timestamp: Date.now(), payload: { title: changeInfo.title, url: tab.url ?? "" } },
+            String(tabId),
+        );
     }
 
     // Layer 9: Media — audible state
@@ -133,28 +149,42 @@ chrome.tabs.onUpdated.addListener((_, changeInfo, tab) => {
         dev.log("tap", "media.audio", "audible state changed", {
             audible: changeInfo.audible,
         });
+        aggregator.ingestSignal(
+            { type: "media.audio", timestamp: Date.now(), payload: { audible: changeInfo.audible } },
+            String(tabId),
+        );
     }
 });
 
 // ── Layer 3: Attention ──────────────────────────────────────
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
+    aggregator.onTabActivated();
     chrome.tabs.get(activeInfo.tabId, (tab) => {
         dev.log("tap", "attention.active", "tab activated", {
             active: true,
             url: tab?.url ?? "",
             title: tab?.title ?? "",
         });
+        aggregator.ingestSignal(
+            { type: "attention.active", timestamp: Date.now(), payload: { active: true, url: tab?.url ?? "", title: tab?.title ?? "" } },
+            String(activeInfo.tabId),
+        );
     });
 });
 
 chrome.windows.onFocusChanged.addListener((windowId) => {
+    aggregator.onWindowFocusChanged(windowId);
     if (windowId === chrome.windows.WINDOW_ID_NONE) {
         dev.log("tap", "attention.visible", "browser lost focus", {
             visible: false,
             url: "",
             title: "",
         });
+        aggregator.ingestSignal(
+            { type: "attention.visible", timestamp: Date.now(), payload: { visible: false, url: "", title: "" } },
+            "unknown",
+        );
     } else {
         chrome.tabs.query({ active: true, windowId }, (tabs) => {
             const tab = tabs[0];
@@ -163,6 +193,10 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
                 url: tab?.url ?? "",
                 title: tab?.title ?? "",
             });
+            aggregator.ingestSignal(
+                { type: "attention.visible", timestamp: Date.now(), payload: { visible: true, url: tab?.url ?? "", title: tab?.title ?? "" } },
+                String(tab?.id ?? "unknown"),
+            );
         });
     }
 });
@@ -185,6 +219,10 @@ chrome.downloads.onChanged.addListener((delta) => {
             size: item.totalBytes,
             state: delta.state!.current!,
         });
+        aggregator.ingestSignal(
+            { type: "media.download", timestamp: Date.now(), payload: { filename: item.filename, url: item.url, mime: item.mime, size: item.totalBytes, state: delta.state!.current! } },
+            "unknown",
+        );
     });
 });
 

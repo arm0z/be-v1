@@ -251,6 +251,26 @@ export interface FileContentPayload {
     length: number;
 }
 
+// ── signals (service-worker-originated events) ─────────────────────
+
+interface BaseSignal<T extends string, P> {
+    type: T;
+    timestamp: number;
+    payload: P;
+}
+
+/** SW-originated events that flow into bundles without triggering source transitions. */
+export type Signal =
+    | BaseSignal<"nav.completed", NavCompletedPayload>
+    | BaseSignal<"nav.spa", NavSpaPayload>
+    | BaseSignal<"nav.title_changed", NavTitleChangedPayload>
+    | BaseSignal<"tab.created", TabCreatedPayload>
+    | BaseSignal<"tab.closed", TabClosedPayload>
+    | BaseSignal<"attention.active", AttentionActivePayload>
+    | BaseSignal<"attention.visible", AttentionVisiblePayload>
+    | BaseSignal<"media.audio", MediaAudioPayload>
+    | BaseSignal<"media.download", MediaDownloadPayload>;
+
 // ── discriminated union ─────────────────────────────────────────────
 
 /** Content-script capture: flows through the pipeline before the service worker stamps it. */

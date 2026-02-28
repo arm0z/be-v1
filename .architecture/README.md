@@ -55,17 +55,17 @@ Lifecycle:
 
 ### Event Glossary
 
-| Term           | What it is                                                                                                                                   | Type signature                             |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| **Capture**    | A single typed event record flowing through the content-script pipeline. Discriminated union on `type`.                                      | `{ type, timestamp, context, payload }`    |
-| **Tap**        | The base layer. Hooks into the DOM and produces a stream of Captures. Returns a Teardown.                                                    | `(sink: (c: Capture) => void) => Teardown` |
-| **Adapter**    | Domain-specific middleware. Wraps a Tap to inject, filter, or transform Captures (e.g. HTML snapshots, Outlook email parsing, file reading). | `(inner: Tap) => Tap`                      |
+| Term           | What it is                                                                                                                                          | Type signature                             |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| **Capture**    | A single typed event record flowing through the content-script pipeline. Discriminated union on `type`.                                             | `{ type, timestamp, context, payload }`    |
+| **Tap**        | The base layer. Hooks into the DOM and produces a stream of Captures. Returns a Teardown.                                                           | `(sink: (c: Capture) => void) => Teardown` |
+| **Adapter**    | Domain-specific middleware. Wraps a Tap to inject, filter, or transform Captures (e.g. HTML snapshots, Outlook email parsing, file reading).        | `(inner: Tap) => Tap`                      |
 | **Normalizer** | Event-aggregation middleware. Wraps a Tap to consume, deduplicate, or batch Captures. Consumed events never reach the Relay. Same shape as Adapter. | `(inner: Tap) => Tap`                      |
-| **Relay**      | Terminal layer. Wraps a Tap and forwards Captures to the service worker. Caps the chain.                                                     | `(inner: Tap) => Teardown`                 |
-| **Teardown**   | A function that stops the pipeline and cleans up all resources.                                                                              | `() => void`                               |
-| **Route**      | A URL pattern paired with a pipeline builder. The registry is an ordered list of Routes; first match wins.                                   | `{ match, build }`                         |
-| **Registry**   | Ordered list of Routes. Consulted by the bootstrap on every page load.                                                                       | `Route[]`                                  |
-| **Pipeline**   | A fully composed chain: `Tap → Adapter(s) → Normalizer → Relay → Teardown`.                                                                  | —                                          |
+| **Relay**      | Terminal layer. Wraps a Tap and forwards Captures to the service worker. Caps the chain.                                                            | `(inner: Tap) => Teardown`                 |
+| **Teardown**   | A function that stops the pipeline and cleans up all resources.                                                                                     | `() => void`                               |
+| **Route**      | A URL pattern paired with a pipeline builder. The registry is an ordered list of Routes; first match wins.                                          | `{ match, build }`                         |
+| **Registry**   | Ordered list of Routes. Consulted by the bootstrap on every page load.                                                                              | `Route[]`                                  |
+| **Pipeline**   | A fully composed chain: `Tap → Adapter(s) → Normalizer → Relay → Teardown`.                                                                         | —                                          |
 
 Adapter and Normalizer share the same signature (`Tap → Tap`), which is what makes them freely composable in any order and count. Relay caps the chain by collapsing it to just a Teardown.
 
@@ -393,7 +393,7 @@ function observeSpaNavigation(onNavigate: (url: string) => void): void {
 │  └──────────────────────────┬──────────────────────────────────────────┘│
 │                             │                                           │
 │                             ▼                                           │
-│  ┌─ Packer ───────────────────────────────────────────────────────────┐│
+│  ┌─ Packer ────────────────────────────────────────────────────────────┐│
 │  │                                                                     ││
 │  │   on sync trigger:                                                  ││
 │  │     1. partition graph into Groups (community detection)            ││
