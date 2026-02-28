@@ -182,7 +182,7 @@ function htmlAdapter(inner: Tap): Tap {
 }
 ```
 
-Usage — the full generic web pipeline:
+Usage — the full generic web pipeline (composed in [`src/event/registry.ts`](../src/event/registry.ts)):
 
 ```typescript
 const teardown = relay(normalizer(htmlAdapter(tap())));
@@ -885,7 +885,7 @@ type DevCommand =
   ;
 ```
 
-### Example: dev.log
+### Example: dev.log — [`src/event/dev.ts`](../src/event/dev.ts)
 
 ```typescript
 // ── dev.ts (imported everywhere) ────────────────────────────
