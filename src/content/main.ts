@@ -1,5 +1,6 @@
-import { registry } from "../event/registry.ts";
 import { needsSpaObserver, observeSpaNavigation } from "../event/spa-observer.ts";
+
+import { registry } from "../event/registry.ts";
 
 function bootstrap(): void {
   const url = window.location.href;

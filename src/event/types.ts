@@ -1,10 +1,10 @@
 // ── Primitives ──────────────────────────────────────────────
 
 export type Capture = {
-  kind: string;
-  context: string;
-  timestamp: number;
-  payload: Record<string, unknown>;
+    kind: string;
+    context: string;
+    timestamp: number;
+    payload: Record<string, unknown>;
 };
 
 export type Teardown = () => void;
@@ -26,6 +26,6 @@ export type Relay = (inner: Tap) => Teardown;
 // ── Routing ─────────────────────────────────────────────────
 
 export type Route = {
-  match: (url: string) => boolean;
-  build: () => Teardown;
+    match: (url: string) => boolean;
+    build: () => Teardown;
 };
