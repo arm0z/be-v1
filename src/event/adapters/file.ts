@@ -304,7 +304,7 @@ export const fileAdapter: Adapter = (inner) => {
 
             sink({
                 type: FILE_CONTENT,
-                ts: Date.now(),
+                timestamp: Date.now(),
                 context: "root",
                 payload: {
                     url,

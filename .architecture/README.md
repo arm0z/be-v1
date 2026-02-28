@@ -20,7 +20,7 @@
 │  │   events     inject / snap    dedup             port              │  │
 │  │                                                                   │  │
 │  │   ◀──────── Capture ────────▶                   ◀── Teardown ───▶ │  │
-│  │   { type, ts, context, payload }                  () => void      │  │
+│  │   { type, timestamp, context, payload }             () => void      │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
 │  ┌─ SPA Observer (optional) ─────────────────────────────────────────┐  │
@@ -42,9 +42,9 @@ Lifecycle:
 | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`src/event/types.ts`](../src/event/types.ts)                       | Discriminated union type system. Defines `Capture` (content-script pipeline, 14 event types), `SessionEvent` (full stamped, 28 event types), shared target types (`ClickTarget`, `KeystrokeTarget`, `FormTarget`), per-layer payload interfaces, and pipeline types (`Tap`, `Adapter`, `Normalizer`, `Relay`, `Route`).                                                                                                          |
 | [`src/event/tap.ts`](../src/event/tap.ts)                           | Base Tap. Hooks 14 DOM listeners (`keydown`, `compositionstart/update/end`, `click`, `auxclick`, `dblclick`, `contextmenu`, `scroll`, `selectionchange`, `copy`, `paste`, `focusin`, `change`, `submit`) via a single `AbortController`. Builds fully typed `Capture` payloads. Redacts sensitive fields (passwords, credit cards, SSNs).                                                                                        |
-| [`src/event/adapters/html.ts`](../src/event/adapters/html.ts)       | HTML snapshot Adapter. Exports `SNAPSHOT_VIEWPORT` const and uses `SnapshotViewportPayload`. Injects periodic `snapshot.viewport` Captures every 60 s, deduped by content hash.                                                                                                                                                                                                                                                  |
+| [`src/event/adapters/html.ts`](../src/event/adapters/html.ts)       | HTML content Adapter. Exports `HTML_CONTENT` const and uses `HTMLContentPayload`. Injects event-driven `html.content` Captures on navigation, significant scroll (≥ 50% viewport), and DOM mutations (dialogs, large content changes). Deduped by content hash, debounced 500 ms, cooldown 2 s.                                                                                                                                  |
 | [`src/event/adapters/outlook.ts`](../src/event/adapters/outlook.ts) | Outlook Adapter. Filters out Captures from transient routes (e.g. email list between two emails).                                                                                                                                                                                                                                                                                                                                |
-| [`src/event/adapters/file.ts`](../src/event/adapters/file.ts)       | File Adapter. Exports `FILE_CONTENT` const and `FileContentPayload`. Reads `file://` page text and emits a `file.content` Capture on pipeline start.                                                                                                                                                                                                                                                                             |
+| [`src/event/adapters/file.ts`](../src/event/adapters/file.ts)       | File Adapter. Exports `FILE_CONTENT` const and `FileContentPayload`. Categorizes files by extension (text, markup, image, audio, video, pdf, binary), extracts text content (including PDF via `pdfjs-dist`), truncates at 65 KB, and emits a `file.content` Capture on pipeline start.                                                                                                                                          |
 | [`src/event/normalizer.ts`](../src/event/normalizer.ts)             | Composable normalizer factory. Four individual normalizers: `keystrokeNormalizer` (batches printable keys, flushes after 1 s idle, flushes on IME composition start), `scrollNormalizer` (debounces 150 ms), `selectionNormalizer` (debounces 300 ms, drops empty), `formFocusNormalizer` (deduplicates rapid re-focus within same form). `normalizerFactory(opts)` composes them; `normalizer` is the default with all enabled. |
 | [`src/event/relay.ts`](../src/event/relay.ts)                       | Terminal Relay. Forwards every Capture to the service worker via `chrome.runtime.sendMessage({ type: "capture", payload })`.                                                                                                                                                                                                                                                                                                     |
 | [`src/event/registry.ts`](../src/event/registry.ts)                 | Route registry. Ordered list of `Route` objects — Outlook, file://, and a catch-all generic web pipeline. First match wins.                                                                                                                                                                                                                                                                                                      |
@@ -57,7 +57,7 @@ Lifecycle:
 
 | Term           | What it is                                                                                                                                   | Type signature                             |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| **Capture**    | A single typed event record flowing through the content-script pipeline. Discriminated union on `type`.                                      | `{ type, ts, context, payload }`           |
+| **Capture**    | A single typed event record flowing through the content-script pipeline. Discriminated union on `type`.                                      | `{ type, timestamp, context, payload }`    |
 | **Tap**        | The base layer. Hooks into the DOM and produces a stream of Captures. Returns a Teardown.                                                    | `(sink: (c: Capture) => void) => Teardown` |
 | **Adapter**    | Domain-specific middleware. Wraps a Tap to inject, filter, or transform Captures (e.g. HTML snapshots, Outlook email parsing, file reading). | `(inner: Tap) => Tap`                      |
 | **Normalizer** | Event-aggregation middleware. Wraps a Tap to deduplicate or batch Captures (e.g. keystroke batching). Same shape as Adapter.                 | `(inner: Tap) => Tap`                      |
@@ -75,7 +75,7 @@ Adapter and Normalizer share the same signature (`Tap → Tap`), which is what m
 
 A tab gets opened, a Tap is attached to that tab. That Tap emits a `context: string` in each Capture — the context is an identifier within the tab, e.g. `"root"` by default, but sometimes a specific area like `"dashboard"`. The `source` of a Capture is `<context>@<tab_id>`, e.g. `root@123` or `dashboard@123`.
 
-Each Tap can be wrapped with Adapters for domain-specific behavior — e.g. on a news site an HTML snapshot Adapter triggers periodically and emits `viewport.snapshot` Captures, on `file://` a file Adapter reads file contents, on Outlook an Outlook Adapter parses email views. These are modular and easily replaceable.
+Each Tap can be wrapped with Adapters for domain-specific behavior — e.g. on a news site an HTML content Adapter triggers on navigation, scroll, and DOM mutations to emit `html.content` Captures, on `file://` a file Adapter categorizes and reads file contents, on Outlook an Outlook Adapter filters transient routes. These are modular and easily replaceable.
 
 The chain is composed like so:
 
@@ -91,7 +91,7 @@ The Relay sends Captures to the service worker. The Normalizer aggregates events
 
 Events are a discriminated union keyed on `type`. Two levels:
 
-- **`BaseCapture<T, P>`** — content-script pipeline (no `tabId`/`windowId`/`source` yet): `{ type, ts, context, payload }`
+- **`BaseCapture<T, P>`** — content-script pipeline (no `tabId`/`windowId`/`source` yet): `{ type, timestamp, context, payload }`
 - **`BaseEvent<T, P>`** — full stamped event (service worker adds `tabId`, `windowId`, `source`)
 - **`Capture`** — union of `BaseCapture` variants (14 content-script event types)
 - **`SessionEvent`** — union of `BaseEvent` variants (28 total event types, including service-worker-only events)
@@ -111,8 +111,8 @@ Events by layer:
 | 7. Clipboard  | `input.selection`, `input.copy`, `input.paste`                                                                   | Content script (`selectionchange`, `copy`, `paste`)             |
 | 8. Forms      | `input.form_focus`, `input.form_change`, `input.form_submit`                                                     | Content script (`focusin`, `change`, `submit`)                  |
 | 9. Media      | `media.audio`, `media.download`                                                                                  | Service worker (`chrome.tabs.onUpdated`, `chrome.downloads.*`)  |
-| 10. Snapshots | `snapshot.viewport`                                                                                              | HTML Adapter                                                    |
-| Adapter       | `file.content`                                                                                                   | File Adapter                                                    |
+| 10. Adapters  | `html.content`                                                                                                   | HTML Adapter (navigation, scroll, mutation triggers)            |
+|               | `file.content`                                                                                                   | File Adapter (file:// pages, categorized by extension)          |
 
 ```typescript
 // ── Pipeline stages ─────────────────────────────────────────
@@ -126,7 +126,7 @@ type Relay = (inner: Tap) => Teardown;
 
 ### Example: Generic HTML Pipeline — [`src/event/tap.ts`](../src/event/tap.ts) + [`src/event/adapters/html.ts`](../src/event/adapters/html.ts)
 
-A Tap that hooks all DOM listeners via a single AbortController, wrapped with an Adapter that injects periodic HTML snapshots (deduped by content hash):
+A Tap that hooks all DOM listeners via a single AbortController, wrapped with an Adapter that injects event-driven HTML content snapshots (deduped by content hash):
 
 ```typescript
 /** Base Tap: attaches DOM listeners and streams all content-script Captures. */
@@ -141,7 +141,7 @@ function tap(context = "root"): Tap {
       const target = e.target instanceof Element ? e.target : null;
       sink({
         type: "input.click",
-        ts: Date.now(),
+        timestamp: Date.now(),
         context,
         payload: { x: e.clientX, y: e.clientY, button: e.button, target: clickTarget(target) },
       });
@@ -155,35 +155,41 @@ function tap(context = "root"): Tap {
   };
 }
 
-/** Adapter: wraps any Tap and injects periodic HTML snapshots (deduped). */
+/** Adapter: wraps any Tap and injects event-driven HTML content snapshots (deduped). */
 const htmlAdapter: Adapter = (inner) => {
   return (sink) => {
     let lastHash: string | null = null;
     const teardownInner = inner(sink);
 
-    // periodic snapshot, skipped if nothing changed
-    const interval = setInterval(() => {
+    function takeSnapshot(trigger: HTMLContentPayload["trigger"]) {
       const html = document.documentElement.outerHTML;
+      const text = extractDOM();
       const hash = simpleHash(html);
       if (hash === lastHash) return;
       lastHash = hash;
       sink({
-        type: "snapshot.viewport",
-        ts: Date.now(),
+        type: "html.content",
+        timestamp: Date.now(),
         context: "root",
         payload: {
-          generator: "htmlAdapter",
-          trigger: "mutation",
+          trigger,
           url: window.location.href,
           title: document.title,
           viewport: { width: innerWidth, height: innerHeight, scrollY, scrollPercent },
-          content: html,
-        } satisfies SnapshotViewportPayload,
+          html,
+          text,
+        } satisfies HTMLContentPayload,
       });
-    }, 60_000);
+    }
+
+    // triggers: navigation (on load), scroll (≥ 50% viewport), DOM mutations (dialogs, large content)
+    scheduleSnapshot("navigation");
+    document.addEventListener("scroll", () => { /* debounced, threshold-gated */ }, { passive: true, signal });
+    new MutationObserver(() => { /* settle + debounce → scheduleSnapshot("mutation") */ }).observe(document.body, ...);
 
     return () => {
-      clearInterval(interval);
+      ac.abort();
+      observer.disconnect();
       teardownInner();
     };
   };
@@ -933,7 +939,7 @@ function tap(context = "root"): Tap {
     document.addEventListener("click", (e) => {
       const cap: Capture = {
         type: "input.click",
-        ts: Date.now(),
+        timestamp: Date.now(),
         context,
         payload: { x: e.clientX, y: e.clientY, button: e.button, target: clickTarget(e.target) },
       };

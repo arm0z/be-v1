@@ -38,7 +38,7 @@ export function tap(context = "root"): Tap {
                 const redacted = kt.redacted;
                 const cap: Capture = {
                     type: "input.keystroke",
-                    ts: Date.now(),
+                    timestamp: Date.now(),
                     context,
                     payload: {
                         key: redacted ? "*" : e.key,
@@ -74,7 +74,7 @@ export function tap(context = "root"): Tap {
             const kt = keystrokeTarget(target);
             const cap: Capture = {
                 type: "input.composition",
-                ts: Date.now(),
+                timestamp: Date.now(),
                 context,
                 payload: {
                     data: kt.redacted ? "*" : (e.data ?? ""),
@@ -108,7 +108,7 @@ export function tap(context = "root"): Tap {
             const target = e.target instanceof Element ? e.target : null;
             const cap: Capture = {
                 type,
-                ts: Date.now(),
+                timestamp: Date.now(),
                 context,
                 payload: {
                     x: e.clientX,
@@ -135,13 +135,13 @@ export function tap(context = "root"): Tap {
                 type === "input.double_click"
                     ? {
                           type,
-                          ts: Date.now(),
+                          timestamp: Date.now(),
                           context,
                           payload: payload satisfies InputDoubleClickPayload,
                       }
                     : {
                           type,
-                          ts: Date.now(),
+                          timestamp: Date.now(),
                           context,
                           payload: payload satisfies InputContextMenuPayload,
                       };
@@ -178,7 +178,7 @@ export function tap(context = "root"): Tap {
                 const docEl = document.documentElement;
                 const cap: Capture = {
                     type: "input.scroll",
-                    ts: Date.now(),
+                    timestamp: Date.now(),
                     context,
                     payload: {
                         scrollY: window.scrollY,
@@ -207,7 +207,7 @@ export function tap(context = "root"): Tap {
                 const anchor = sel?.anchorNode?.parentElement;
                 const cap: Capture = {
                     type: "input.selection",
-                    ts: Date.now(),
+                    timestamp: Date.now(),
                     context,
                     payload: {
                         text: text.slice(0, 500),
@@ -229,7 +229,7 @@ export function tap(context = "root"): Tap {
                 const text = sel?.toString() ?? "";
                 const cap: Capture = {
                     type: "input.copy",
-                    ts: Date.now(),
+                    timestamp: Date.now(),
                     context,
                     payload: { length: text.length } satisfies InputCopyPayload,
                 };
@@ -246,7 +246,7 @@ export function tap(context = "root"): Tap {
                 const text = e.clipboardData?.getData("text/plain") ?? "";
                 const cap: Capture = {
                     type: "input.paste",
-                    ts: Date.now(),
+                    timestamp: Date.now(),
                     context,
                     payload: {
                         length: text.length,
@@ -271,7 +271,7 @@ export function tap(context = "root"): Tap {
                 if (!target || !isFormElement(target)) return;
                 const cap: Capture = {
                     type: "input.form_focus",
-                    ts: Date.now(),
+                    timestamp: Date.now(),
                     context,
                     payload: {
                         target: formTarget(target),
@@ -293,7 +293,7 @@ export function tap(context = "root"): Tap {
                 const sensitive = isSensitiveField(target);
                 const cap: Capture = {
                     type: "input.form_change",
-                    ts: Date.now(),
+                    timestamp: Date.now(),
                     context,
                     payload: {
                         target: {
@@ -319,7 +319,7 @@ export function tap(context = "root"): Tap {
                 if (!form) return;
                 const cap: Capture = {
                     type: "input.form_submit",
-                    ts: Date.now(),
+                    timestamp: Date.now(),
                     context,
                     payload: {
                         action: form.action || "",

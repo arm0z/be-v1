@@ -69,7 +69,7 @@ export const htmlAdapter: Adapter = (inner) => {
             dev.log("adapter", HTML_CONTENT, "html snapshot", { trigger });
             sink({
                 type: HTML_CONTENT,
-                ts: now,
+                timestamp: now,
                 context: "root",
                 payload: {
                     trigger,

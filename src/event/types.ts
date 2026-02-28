@@ -250,14 +250,14 @@ export interface FileContentPayload {
 /** Content-script capture: flows through the pipeline before the service worker stamps it. */
 interface BaseCapture<T extends string, P> {
     type: T;
-    ts: number;
+    timestamp: number;
     context: string;
     payload: P;
 }
 
 /** Full stamped event: service worker adds tabId, windowId, source. */
 interface BaseEvent<T extends string, P> {
-    ts: number;
+    timestamp: number;
     tabId: string;
     windowId: number;
     context: string;

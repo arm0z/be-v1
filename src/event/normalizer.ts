@@ -29,7 +29,7 @@ export const keystrokeNormalizer: NormalizerFn = (inner) => {
             );
             sink({
                 ...lastCapture,
-                ts: Date.now(),
+                timestamp: Date.now(),
                 payload: { ...lastCapture.payload, key: batched },
             });
             keyBuffer = [];
@@ -64,16 +64,21 @@ export const keystrokeNormalizer: NormalizerFn = (inner) => {
                 );
                 flush();
             }
-            if (
-                capture.type === "input.composition" &&
-                capture.payload.stage === "start"
-            ) {
-                dev.log(
-                    "normalizer",
-                    "input.composition",
-                    "flush: composition start",
-                );
-                flush();
+            if (capture.type === "input.composition") {
+                if (capture.payload.stage === "start") {
+                    dev.log(
+                        "normalizer",
+                        "input.composition",
+                        "flush: composition start",
+                    );
+                    flush();
+                } else {
+                    dev.log(
+                        "normalizer",
+                        "input.composition",
+                        `pass-through: composition ${capture.payload.stage}`,
+                    );
+                }
             }
             if (
                 capture.type !== "input.keystroke" &&
@@ -229,7 +234,7 @@ export const formFocusNormalizer: NormalizerFn = (inner) => {
         const teardownInner = inner((capture) => {
             if (capture.type === "input.form_focus") {
                 const formSel = capture.payload.form?.selector;
-                const now = capture.ts;
+                const now = capture.timestamp;
                 const sameForm =
                     formSel !== undefined &&
                     formSel === lastFormSelector &&

@@ -18,7 +18,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 			`[${capture.type}]`,
 			`source:${source}`,
 			`tab:${tabId}`,
-			capture.ts,
+			capture.timestamp,
 			capture.payload,
 		);
 	}
