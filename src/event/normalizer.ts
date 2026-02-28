@@ -23,14 +23,19 @@ export const keystrokeNormalizer: NormalizerFn = (inner) => {
             const batched = keyBuffer.join("");
             dev.log(
                 "normalizer",
-                "input.keystroke",
-                `flush: batched ${keyBuffer.length} keystrokes → "${batched}"`,
-                { count: keyBuffer.length, key: batched },
+                "input.keystroke.batch",
+                `batched ${keyBuffer.length} keys → "${batched}"`,
+                { count: keyBuffer.length, text: batched },
             );
             sink({
-                ...lastCapture,
+                type: "input.keystroke_batch",
                 timestamp: Date.now(),
-                payload: { ...lastCapture.payload, key: batched },
+                context: lastCapture.context,
+                payload: {
+                    text: batched,
+                    count: keyBuffer.length,
+                    target: lastCapture.payload.target,
+                },
             });
             keyBuffer = [];
             lastCapture = null;
@@ -46,49 +51,25 @@ export const keystrokeNormalizer: NormalizerFn = (inner) => {
                 const { key } = capture.payload;
                 const { ctrl, alt, meta } = capture.payload.modifiers;
                 if (key.length === 1 && !ctrl && !alt && !meta) {
-                    dev.log(
-                        "normalizer",
-                        "input.keystroke",
-                        `buffer: "${key}" (${keyBuffer.length + 1} buffered)`,
-                    );
                     keyBuffer.push(key);
                     lastCapture = capture;
                     resetTimer();
                     return;
                 }
-                dev.log(
-                    "normalizer",
-                    "input.keystroke",
-                    `pass-through: "${key}" (special/modified)`,
-                    { key, ctrl, alt, meta },
-                );
                 flush();
+                return;
             }
             if (capture.type === "input.composition") {
                 if (capture.payload.stage === "start") {
                     dev.log(
                         "normalizer",
-                        "input.composition",
-                        "flush: composition start",
+                        "input.keystroke.flush",
+                        "flushed buffer before IME composition",
+                        { buffered: keyBuffer.join("") },
                     );
                     flush();
-                } else {
-                    dev.log(
-                        "normalizer",
-                        "input.composition",
-                        `pass-through: composition ${capture.payload.stage}`,
-                    );
                 }
-            }
-            if (
-                capture.type !== "input.keystroke" &&
-                capture.type !== "input.composition"
-            ) {
-                dev.log(
-                    "normalizer",
-                    capture.type,
-                    "pass-through (keystroke layer)",
-                );
+                return;
             }
             sink(capture);
         });
@@ -116,9 +97,9 @@ export const scrollNormalizer: NormalizerFn = (inner) => {
             if (!last) return;
             dev.log(
                 "normalizer",
-                "input.scroll",
-                `flush: scroll idle (dropped ${dropped} intermediate)`,
-                { scrollY: last.payload.scrollY, percent: last.payload.percent },
+                "input.scroll.flush",
+                `scroll settled at ${Math.round(last.payload.percent * 100)}% (dropped ${dropped})`,
+                { scrollY: last.payload.scrollY, percent: last.payload.percent, dropped },
             );
             sink(last);
             last = null;
@@ -128,17 +109,11 @@ export const scrollNormalizer: NormalizerFn = (inner) => {
         const teardownInner = inner((capture) => {
             if (capture.type === "input.scroll") {
                 if (last) dropped++;
-                dev.log(
-                    "normalizer",
-                    "input.scroll",
-                    `debounce: scroll event (${dropped} pending)`,
-                );
                 last = capture;
                 if (timer) clearTimeout(timer);
                 timer = setTimeout(flush, SCROLL_IDLE_MS);
                 return;
             }
-            dev.log("normalizer", capture.type, "pass-through (scroll layer)");
             sink(capture);
         });
 
@@ -166,8 +141,8 @@ export const selectionNormalizer: NormalizerFn = (inner) => {
             if (!last.payload.text) {
                 dev.log(
                     "normalizer",
-                    "input.selection",
-                    `drop: empty selection (dropped ${dropped + 1} total)`,
+                    "input.selection.drop",
+                    `dropped empty selection (${dropped + 1} events)`,
                 );
                 last = null;
                 dropped = 0;
@@ -175,9 +150,9 @@ export const selectionNormalizer: NormalizerFn = (inner) => {
             }
             dev.log(
                 "normalizer",
-                "input.selection",
-                `flush: selection idle (dropped ${dropped} intermediate)`,
-                { text: last.payload.text.slice(0, 80) },
+                "input.selection.flush",
+                `selected: "${last.payload.text.slice(0, 120)}"`,
+                { text: last.payload.text, dropped },
             );
             sink(last);
             last = null;
@@ -187,32 +162,15 @@ export const selectionNormalizer: NormalizerFn = (inner) => {
         const teardownInner = inner((capture) => {
             if (capture.type === "input.selection") {
                 if (last) dropped++;
-                dev.log(
-                    "normalizer",
-                    "input.selection",
-                    `debounce: selection event (${dropped} pending)`,
-                );
                 last = capture;
                 if (timer) clearTimeout(timer);
                 timer = setTimeout(flush, SELECTION_IDLE_MS);
                 return;
             }
-            dev.log(
-                "normalizer",
-                capture.type,
-                "pass-through (selection layer)",
-            );
             sink(capture);
         });
 
         return () => {
-            if (last) {
-                dev.log(
-                    "normalizer",
-                    "input.selection",
-                    "teardown: discarding partial selection",
-                );
-            }
             last = null;
             if (timer) clearTimeout(timer);
             teardownInner();
@@ -244,8 +202,8 @@ export const formFocusNormalizer: NormalizerFn = (inner) => {
                 if (sameForm) {
                     dev.log(
                         "normalizer",
-                        "input.form_focus",
-                        "dedup: same form re-focused, stripping snapshot",
+                        "input.form_focus.dedup",
+                        `deduped re-focus on ${formSel}`,
                         { selector: formSel },
                     );
                     sink({
@@ -254,19 +212,6 @@ export const formFocusNormalizer: NormalizerFn = (inner) => {
                     });
                     return;
                 }
-                dev.log(
-                    "normalizer",
-                    "input.form_focus",
-                    "pass-through: new form focus",
-                    { selector: formSel },
-                );
-            }
-            if (capture.type !== "input.form_focus") {
-                dev.log(
-                    "normalizer",
-                    capture.type,
-                    "pass-through (formFocus layer)",
-                );
             }
             sink(capture);
         });

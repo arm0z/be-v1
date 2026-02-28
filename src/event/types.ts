@@ -120,6 +120,12 @@ export interface InputKeystrokePayload {
     repeat: boolean;
 }
 
+export interface InputKeystrokeBatchPayload {
+    text: string;
+    count: number;
+    target: KeystrokeTarget;
+}
+
 export interface InputCompositionPayload {
     data: string;
     stage: "start" | "update" | "end";
@@ -270,6 +276,7 @@ interface BaseEvent<T extends string, P> {
 export type Capture =
     // Layer 4: Keystrokes
     | BaseCapture<"input.keystroke", InputKeystrokePayload>
+    | BaseCapture<"input.keystroke_batch", InputKeystrokeBatchPayload>
     | BaseCapture<"input.composition", InputCompositionPayload>
     // Layer 5: Mouse & Touch
     | BaseCapture<"input.click", InputClickPayload>
@@ -310,6 +317,7 @@ export type SessionEvent =
     | BaseEvent<"attention.idle", AttentionIdlePayload>
     // Layer 4: Keystrokes
     | BaseEvent<"input.keystroke", InputKeystrokePayload>
+    | BaseEvent<"input.keystroke_batch", InputKeystrokeBatchPayload>
     | BaseEvent<"input.composition", InputCompositionPayload>
     // Layer 5: Mouse & Touch
     | BaseEvent<"input.click", InputClickPayload>

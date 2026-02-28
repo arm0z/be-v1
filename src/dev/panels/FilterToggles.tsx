@@ -34,7 +34,13 @@ const EVENT_GROUPS: { label: string; events: string[] }[] = [
 	},
 	{
 		label: "KEYSTROKES",
-		events: ["input.keystroke", "input.composition"],
+		events: [
+			"input.keystroke",
+			"input.keystroke_batch",
+			"input.keystroke.batch",
+			"input.keystroke.flush",
+			"input.composition",
+		],
 	},
 	{
 		label: "MOUSE",
@@ -42,15 +48,26 @@ const EVENT_GROUPS: { label: string; events: string[] }[] = [
 	},
 	{
 		label: "SCROLL",
-		events: ["input.scroll"],
+		events: ["input.scroll", "input.scroll.flush"],
 	},
 	{
 		label: "CLIPBOARD",
-		events: ["input.selection", "input.copy", "input.paste"],
+		events: [
+			"input.selection",
+			"input.selection.flush",
+			"input.selection.drop",
+			"input.copy",
+			"input.paste",
+		],
 	},
 	{
 		label: "FORMS",
-		events: ["input.form_focus", "input.form_change", "input.form_submit"],
+		events: [
+			"input.form_focus",
+			"input.form_focus.dedup",
+			"input.form_change",
+			"input.form_submit",
+		],
 	},
 	{
 		label: "MEDIA",

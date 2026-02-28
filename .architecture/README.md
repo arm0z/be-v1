@@ -16,11 +16,11 @@
 │  │   ┌─────┐    ┌─────────┐    ┌────────────┐    ┌───────┐           │  │
 │  │   │ Tap │───▶│ Adapter │───▶│ Normalizer │───▶│ Relay │───────────┼──┼──▶ Service Worker
 │  │   └─────┘    └─────────┘    └────────────┘    └───────┘           │  │
-│  │     DOM        filter /       batch /          sendMessage /      │  │
-│  │   events     inject / snap    dedup             port              │  │
+│  │     DOM        filter /       consume /          port             │  │
+│  │   events     inject / snap   batch / dedup                       │  │
 │  │                                                                   │  │
 │  │   ◀──────── Capture ────────▶                   ◀── Teardown ───▶ │  │
-│  │   { type, timestamp, context, payload }             () => void      │  │
+│  │   { type, timestamp, context, payload }             () => void    │  │
 │  └───────────────────────────────────────────────────────────────────┘  │
 │                                                                         │
 │  ┌─ SPA Observer (optional) ─────────────────────────────────────────┐  │
@@ -38,20 +38,20 @@ Lifecycle:
 
 ### Event Layer Files
 
-| File                                                                | Role                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`src/event/types.ts`](../src/event/types.ts)                       | Discriminated union type system. Defines `Capture` (content-script pipeline, 14 event types), `SessionEvent` (full stamped, 28 event types), shared target types (`ClickTarget`, `KeystrokeTarget`, `FormTarget`), per-layer payload interfaces, and pipeline types (`Tap`, `Adapter`, `Normalizer`, `Relay`, `Route`).                                                                                                          |
-| [`src/event/tap.ts`](../src/event/tap.ts)                           | Base Tap. Hooks 14 DOM listeners (`keydown`, `compositionstart/update/end`, `click`, `auxclick`, `dblclick`, `contextmenu`, `scroll`, `selectionchange`, `copy`, `paste`, `focusin`, `change`, `submit`) via a single `AbortController`. Builds fully typed `Capture` payloads. Redacts sensitive fields (passwords, credit cards, SSNs).                                                                                        |
-| [`src/event/adapters/html.ts`](../src/event/adapters/html.ts)       | HTML content Adapter. Exports `HTML_CONTENT` const and uses `HTMLContentPayload`. Injects event-driven `html.content` Captures on navigation, significant scroll (≥ 50% viewport), and DOM mutations (dialogs, large content changes). Deduped by content hash, debounced 500 ms, cooldown 2 s.                                                                                                                                  |
-| [`src/event/adapters/outlook.ts`](../src/event/adapters/outlook.ts) | Outlook Adapter. Filters out Captures from transient routes (e.g. email list between two emails).                                                                                                                                                                                                                                                                                                                                |
-| [`src/event/adapters/file.ts`](../src/event/adapters/file.ts)       | File Adapter. Exports `FILE_CONTENT` const and `FileContentPayload`. Categorizes files by extension (text, markup, image, audio, video, pdf, binary), extracts text content (including PDF via `pdfjs-dist`), truncates at 65 KB, and emits a `file.content` Capture on pipeline start.                                                                                                                                          |
-| [`src/event/normalizer.ts`](../src/event/normalizer.ts)             | Composable normalizer factory. Four individual normalizers: `keystrokeNormalizer` (batches printable keys, flushes after 1 s idle, flushes on IME composition start), `scrollNormalizer` (debounces 150 ms), `selectionNormalizer` (debounces 300 ms, drops empty), `formFocusNormalizer` (deduplicates rapid re-focus within same form). `normalizerFactory(opts)` composes them; `normalizer` is the default with all enabled. |
-| [`src/event/relay.ts`](../src/event/relay.ts)                       | Terminal Relay. Forwards every Capture to the service worker via `chrome.runtime.sendMessage({ type: "capture", payload })`.                                                                                                                                                                                                                                                                                                     |
-| [`src/event/registry.ts`](../src/event/registry.ts)                 | Route registry. Ordered list of `Route` objects — Outlook, file://, and a catch-all generic web pipeline. First match wins.                                                                                                                                                                                                                                                                                                      |
-| [`src/event/spa-observer.ts`](../src/event/spa-observer.ts)         | SPA navigation observer. Monkey-patches `history.pushState`/`replaceState` and listens for `popstate` to detect client-side route changes.                                                                                                                                                                                                                                                                                       |
-| [`src/event/dev.ts`](../src/event/dev.ts)                           | Dev logging utility. Structured `dev.log(channel, event, message, data)` — no-op in production (tree-shaken out), sends `{ type: "dev:log", entry }` to service worker in dev mode.                                                                                                                                                                                                                                              |
-| [`src/content/main.ts`](../src/content/main.ts)                     | Content script bootstrap. Entry point injected on `<all_urls>`. Reads the URL, matches against the registry, builds the pipeline, and installs the SPA observer if needed.                                                                                                                                                                                                                                                       |
-| [`src/background/main.ts`](../src/background/main.ts)               | Service worker. Receives `type: "capture"` messages, logs with source/tabId. In dev mode, runs the **DevHub**: receives `dev:log` messages, filters by channel/event, stores in 10k-entry ring buffer, broadcasts to connected dev pages via ports, and logs to the service worker console.                                                                                                                                      |
+| File                                                                | Role                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`src/event/types.ts`](../src/event/types.ts)                       | Discriminated union type system. Defines `Capture` (content-script pipeline, 15 event types), `SessionEvent` (full stamped, 31 event types), shared target types (`ClickTarget`, `KeystrokeTarget`, `FormTarget`), per-layer payload interfaces, and pipeline types (`Tap`, `Adapter`, `Normalizer`, `Relay`, `Route`).                                                                                                                                                                                                                                                                                               |
+| [`src/event/tap.ts`](../src/event/tap.ts)                           | Base Tap. Hooks 14 DOM listeners (`keydown`, `compositionstart/update/end`, `click`, `auxclick`, `dblclick`, `contextmenu`, `scroll`, `selectionchange`, `copy`, `paste`, `focusin`, `change`, `submit`) via a single `AbortController`. Builds fully typed `Capture` payloads. Redacts sensitive fields (passwords, credit cards, SSNs).                                                                                                                                                                                                                                                                             |
+| [`src/event/adapters/html.ts`](../src/event/adapters/html.ts)       | HTML content Adapter. Exports `HTML_CONTENT` const and uses `HTMLContentPayload`. Injects event-driven `html.content` Captures on navigation, significant scroll (≥ 50% viewport), and DOM mutations (dialogs, large content changes). Deduped by content hash, debounced 500 ms, cooldown 2 s.                                                                                                                                                                                                                                                                                                                       |
+| [`src/event/adapters/outlook.ts`](../src/event/adapters/outlook.ts) | Outlook Adapter. Filters out Captures from transient routes (e.g. email list between two emails).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| [`src/event/adapters/file.ts`](../src/event/adapters/file.ts)       | File Adapter. Exports `FILE_CONTENT` const and `FileContentPayload`. Categorizes files by extension (text, markup, image, audio, video, pdf, binary), extracts text content (including PDF via `pdfjs-dist`), truncates at 65 KB, and emits a `file.content` Capture on pipeline start.                                                                                                                                                                                                                                                                                                                               |
+| [`src/event/normalizer.ts`](../src/event/normalizer.ts)             | Composable normalizer factory. Normalizers **consume** the events they handle — raw events never pass through to the Relay. Four individual normalizers: `keystrokeNormalizer` (consumes `input.keystroke` and `input.composition`, batches printable keys into `input.keystroke_batch` after 1 s idle), `scrollNormalizer` (debounces `input.scroll` at 150 ms), `selectionNormalizer` (debounces `input.selection` at 300 ms, drops empty), `formFocusNormalizer` (strips form snapshot on rapid re-focus within same form). `normalizerFactory(opts)` composes them; `normalizer` is the default with all enabled. |
+| [`src/event/relay.ts`](../src/event/relay.ts)                       | Terminal Relay. Forwards every Capture to the service worker via a persistent `chrome.runtime.connect({ name: "capture" })` port.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| [`src/event/registry.ts`](../src/event/registry.ts)                 | Route registry. Ordered list of `Route` objects — Outlook, file://, and a catch-all generic web pipeline. First match wins.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| [`src/event/spa-observer.ts`](../src/event/spa-observer.ts)         | SPA navigation observer. Monkey-patches `history.pushState`/`replaceState` and listens for `popstate` to detect client-side route changes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| [`src/event/dev.ts`](../src/event/dev.ts)                           | Dev logging utility. Structured `dev.log(channel, event, message, data)` — no-op in production (tree-shaken out), sends `{ type: "dev:log", entry }` to service worker in dev mode.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| [`src/content/main.ts`](../src/content/main.ts)                     | Content script bootstrap. Entry point injected on `<all_urls>`. Reads the URL, matches against the registry, builds the pipeline, and installs the SPA observer if needed.                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| [`src/background/main.ts`](../src/background/main.ts)               | Service worker. Receives Captures via `chrome.runtime.onConnect` port (`name: "capture"`), logs with source/tabId. Listens to Chrome APIs for session, navigation, attention, and media events. In dev mode, runs the **DevHub**: receives `dev:log` messages from content scripts, overrides `dev.log` to call `receive()` directly (no sendMessage round-trip), filters by channel/event, stores in 10k-entry ring buffer, broadcasts to connected dev pages via ports.                                                                                                                                             |
 
 ### Event Glossary
 
@@ -60,7 +60,7 @@ Lifecycle:
 | **Capture**    | A single typed event record flowing through the content-script pipeline. Discriminated union on `type`.                                      | `{ type, timestamp, context, payload }`    |
 | **Tap**        | The base layer. Hooks into the DOM and produces a stream of Captures. Returns a Teardown.                                                    | `(sink: (c: Capture) => void) => Teardown` |
 | **Adapter**    | Domain-specific middleware. Wraps a Tap to inject, filter, or transform Captures (e.g. HTML snapshots, Outlook email parsing, file reading). | `(inner: Tap) => Tap`                      |
-| **Normalizer** | Event-aggregation middleware. Wraps a Tap to deduplicate or batch Captures (e.g. keystroke batching). Same shape as Adapter.                 | `(inner: Tap) => Tap`                      |
+| **Normalizer** | Event-aggregation middleware. Wraps a Tap to consume, deduplicate, or batch Captures. Consumed events never reach the Relay. Same shape as Adapter. | `(inner: Tap) => Tap`                      |
 | **Relay**      | Terminal layer. Wraps a Tap and forwards Captures to the service worker. Caps the chain.                                                     | `(inner: Tap) => Teardown`                 |
 | **Teardown**   | A function that stops the pipeline and cleans up all resources.                                                                              | `() => void`                               |
 | **Route**      | A URL pattern paired with a pipeline builder. The registry is an ordered list of Routes; first match wins.                                   | `{ match, build }`                         |
@@ -85,7 +85,7 @@ const outlook  = relay(normalizer(outlookAdapter(tap())))
 const file     = relay(normalizer(fileAdapter(tap())))
 ```
 
-The Relay sends Captures to the service worker. The Normalizer aggregates events like keyboard typing into a single Capture. The whole chain produces a single Teardown that goes into a tab.
+The Relay sends Captures to the service worker via a persistent port. The Normalizer consumes and aggregates events — e.g. raw keystrokes are consumed and batched into a single `input.keystroke_batch` Capture. The whole chain produces a single Teardown that goes into a tab.
 
 ### Event Types — [`src/event/types.ts`](../src/event/types.ts)
 
@@ -93,8 +93,8 @@ Events are a discriminated union keyed on `type`. Two levels:
 
 - **`BaseCapture<T, P>`** — content-script pipeline (no `tabId`/`windowId`/`source` yet): `{ type, timestamp, context, payload }`
 - **`BaseEvent<T, P>`** — full stamped event (service worker adds `tabId`, `windowId`, `source`)
-- **`Capture`** — union of `BaseCapture` variants (14 content-script event types)
-- **`SessionEvent`** — union of `BaseEvent` variants (28 total event types, including service-worker-only events)
+- **`Capture`** — union of `BaseCapture` variants (15 content-script event types)
+- **`SessionEvent`** — union of `BaseEvent` variants (31 total event types, including service-worker-only events)
 
 Shared target types: `KeystrokeTarget`, `ClickTarget`, `FormTarget`, `Bounds`, `FormFieldInfo`.
 
@@ -105,7 +105,7 @@ Events by layer:
 | 1. Session    | `window.created`, `window.closed`, `window.resized`, `tab.created`, `tab.closed`, `tab.moved`, `tab.transferred` | Service worker (`chrome.windows.*`, `chrome.tabs.*`)            |
 | 2. Navigation | `nav.completed`, `nav.spa`, `nav.title_changed`                                                                  | Service worker (`chrome.webNavigation.*`)                       |
 | 3. Attention  | `attention.active`, `attention.visible`, `attention.mouse_presence`, `attention.idle`                            | Service worker (`chrome.tabs.onActivated`, `chrome.idle.*`)     |
-| 4. Keystrokes | `input.keystroke`, `input.composition`                                                                           | Content script (`keydown`, `composition*`)                      |
+| 4. Keystrokes | `input.keystroke` (raw), `input.keystroke_batch` (normalized), `input.composition` (raw, consumed by normalizer) | Content script (`keydown`, `composition*`)                      |
 | 5. Mouse      | `input.click`, `input.double_click`, `input.context_menu`                                                        | Content script (`click`, `auxclick`, `dblclick`, `contextmenu`) |
 | 6. Scroll     | `input.scroll`                                                                                                   | Content script (`scroll`)                                       |
 | 7. Clipboard  | `input.selection`, `input.copy`, `input.paste`                                                                   | Content script (`selectionchange`, `copy`, `paste`)             |
@@ -113,6 +113,34 @@ Events by layer:
 | 9. Media      | `media.audio`, `media.download`                                                                                  | Service worker (`chrome.tabs.onUpdated`, `chrome.downloads.*`)  |
 | 10. Adapters  | `html.content`                                                                                                   | HTML Adapter (navigation, scroll, mutation triggers)            |
 |               | `file.content`                                                                                                   | File Adapter (file:// pages, categorized by extension)          |
+
+#### Event routing
+
+Events reach the service worker through two paths:
+
+**Via the Relay** (content script pipeline: Tap → Adapter → Normalizer → Relay → service worker port):
+
+| Layer         | Events                                                       |
+| ------------- | ------------------------------------------------------------ |
+| 4. Keystrokes | `input.keystroke_batch`                                      |
+| 5. Mouse      | `input.click`, `input.double_click`, `input.context_menu`    |
+| 6. Scroll     | `input.scroll`                                               |
+| 7. Clipboard  | `input.selection`, `input.copy`, `input.paste`               |
+| 8. Forms      | `input.form_focus`, `input.form_change`, `input.form_submit` |
+| Adapters      | `html.content`, `file.content`                               |
+
+The Normalizer consumes raw `input.keystroke` and `input.composition` events — neither reaches the Relay. Printable keystrokes are batched into `input.keystroke_batch` (emitted after 1 s idle). Non-printable/modified keystrokes and all composition events are consumed without replacement.
+
+**Direct in service worker** (Chrome API listeners in `background/main.ts`, no pipeline):
+
+| Layer         | Events                                                                                                           |
+| ------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 1. Session    | `window.created`, `window.closed`, `window.resized`, `tab.created`, `tab.closed`, `tab.moved`, `tab.transferred` |
+| 2. Navigation | `nav.completed`, `nav.spa`, `nav.title_changed`                                                                  |
+| 3. Attention  | `attention.active`, `attention.visible`, `attention.idle`                                                        |
+| 9. Media      | `media.audio`, `media.download`                                                                                  |
+
+These events come from Chrome extension APIs that are only available in the service worker context — they never touch the content script pipeline.
 
 ```typescript
 // ── Pipeline stages ─────────────────────────────────────────
@@ -365,7 +393,7 @@ function observeSpaNavigation(onNavigate: (url: string) => void): void {
 │  └──────────────────────────┬──────────────────────────────────────────┘│
 │                             │                                           │
 │                             ▼                                           │
-│  ┌─ Grouper ───────────────────────────────────────────────────────────┐│
+│  ┌─ Packer ───────────────────────────────────────────────────────────┐│
 │  │                                                                     ││
 │  │   on sync trigger:                                                  ││
 │  │     1. partition graph into Groups (community detection)            ││
@@ -978,7 +1006,7 @@ if (import.meta.env.DEV) {
       tap: true,
       adapter: true,
       normalizer: true,
-      relay: false,       // noisy, off by default
+      relay: true,
       aggregator: true,
       graph: true,
       sync: true,
