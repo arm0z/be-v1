@@ -243,6 +243,18 @@ export interface OutlookDiscardPayload {
     draftId: string | null;
 }
 
+export interface OutlookContentPayload {
+    mode: "read" | "compose" | "reply" | "forward";
+    subject: string;
+    from: string | null;
+    to: string[];
+    cc: string[];
+    bcc: string[];
+    body: string;
+    attachments: string[];
+    draftId: string | null;
+}
+
 // ── signals (service-worker-originated events) ─────────────────────
 
 interface BaseSignal<T extends string, P> {
@@ -297,7 +309,8 @@ export type Capture =
     | BaseCapture<"file.content", FileContentPayload>
     | BaseCapture<"outlook.navigate", OutlookNavigatePayload>
     | BaseCapture<"outlook.send", OutlookSendPayload>
-    | BaseCapture<"outlook.discard", OutlookDiscardPayload>;
+    | BaseCapture<"outlook.discard", OutlookDiscardPayload>
+    | BaseCapture<"outlook.content", OutlookContentPayload>;
 
 // ── pipeline types ──────────────────────────────────────────────────
 

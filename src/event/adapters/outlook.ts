@@ -1,4 +1,4 @@
-import type { Adapter, Capture } from "../types.ts";
+import type { Adapter, Capture, OutlookContentPayload } from "../types.ts";
 
 import { dev } from "../dev.ts";
 
@@ -54,9 +54,17 @@ function shortHash(id: string): string {
 // ── compose detection helpers ────────────────────────────────────────
 
 const COMPOSE_EDITOR = 'div[aria-label="Message body"][contenteditable="true"]';
-const SUBJECT_INPUT  = 'input[aria-label="Subject"]';
-const SEND_BTN       = '[data-testid="ComposeSendButton"], button[aria-label="Send"]';
-const DISCARD_BTN    = 'button#discardCompose, button[aria-label="Discard"]';
+const SUBJECT_INPUT = 'input[aria-label="Subject"]';
+const SEND_BTN = '[data-testid="ComposeSendButton"], button[aria-label="Send"]';
+const DISCARD_BTN = 'button#discardCompose, button[aria-label="Discard"]';
+
+const BODY_BUDGET = 65_536;
+const READ_SUBJECT = 'span[id$="_SUBJECT"][role="heading"]';
+const READ_FROM = 'span[aria-label^="From:"]';
+const READ_BODY = 'div[id^="UniqueMessageBody_"][role="document"]';
+const READ_ATTACH = 'div[aria-label="Attachments"] button';
+const COMPOSE_ATTACH = '[data-testid="AttachmentCard"]';
+const COMPOSE_ATTACH_FALLBACK = 'div[aria-label^="Attachment"]';
 
 function extractDraftId(): string | null {
     const el = document.querySelector<HTMLInputElement>(SUBJECT_INPUT);
@@ -65,20 +73,130 @@ function extractDraftId(): string | null {
     return m?.[1] ?? null;
 }
 
-function detectComposeMode(subjectValue: string): "compose" | "reply" | "forward" {
+function detectComposeMode(
+    subjectValue: string,
+): "compose" | "reply" | "forward" {
     const trimmed = subjectValue.trimStart();
     if (/^Re:/i.test(trimmed)) return "reply";
     if (/^Fw:/i.test(trimmed)) return "forward";
     return "compose";
 }
 
-function resolveOverlayCtx(): { ctx: string; mode: "compose" | "reply" | "forward"; draftId: string | null } | null {
+function resolveOverlayCtx(): {
+    ctx: string;
+    mode: "compose" | "reply" | "forward";
+    draftId: string | null;
+} | null {
     if (!document.querySelector(COMPOSE_EDITOR)) return null;
     const subjectEl = document.querySelector<HTMLInputElement>(SUBJECT_INPUT);
     const mode = detectComposeMode(subjectEl?.value ?? "");
     const draftId = extractDraftId();
     const ctx = draftId ? `${mode}:${shortHash(draftId)}` : mode;
     return { ctx, mode, draftId };
+}
+
+// ── content extraction ──────────────────────────────────────────────
+
+function extractReadRecipients(field: "To" | "Cc"): string[] {
+    const container = document.querySelector(`div[aria-label^="${field}:"]`);
+    if (!container) return [];
+    const pills = container.querySelectorAll("[data-lpc-hover-target-id]");
+    if (pills.length > 0) {
+        return Array.from(pills)
+            .map((s) => s.textContent?.trim())
+            .filter((s): s is string => !!s);
+    }
+    const label = container.getAttribute("aria-label") ?? "";
+    const after = label.replace(new RegExp(`^${field}:\\s*`), "");
+    return after ? after.split(/,\s*/).filter(Boolean) : [];
+}
+
+function extractComposeRecipients(field: "To" | "Cc" | "Bcc"): string[] {
+    const container = document.querySelector<HTMLElement>(
+        `div[aria-label="${field}"][contenteditable="true"]`,
+    );
+    if (!container) return [];
+    const pills = container.querySelectorAll("[data-lpc-hover-target-id]");
+    if (pills.length > 0) {
+        return Array.from(pills)
+            .map((p) => p.textContent?.trim())
+            .filter((s): s is string => !!s);
+    }
+    return container.innerText
+        .split(/[;\n]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+}
+
+function extractReadAttachments(): string[] {
+    return Array.from(document.querySelectorAll(READ_ATTACH))
+        .map((el) => el.textContent?.trim() ?? "")
+        .filter(Boolean);
+}
+
+function extractComposeAttachments(): string[] {
+    const cards = document.querySelectorAll(COMPOSE_ATTACH);
+    if (cards.length > 0) {
+        return Array.from(cards)
+            .map((el) => el.textContent?.trim() ?? "")
+            .filter(Boolean);
+    }
+    return Array.from(document.querySelectorAll(COMPOSE_ATTACH_FALLBACK))
+        .map((el) =>
+            (el.getAttribute("aria-label") ?? "")
+                .replace(/^Attachment[:\s]*/i, "")
+                .trim(),
+        )
+        .filter(Boolean);
+}
+
+function extractReadSnapshot(): OutlookContentPayload | null {
+    const subjectEl = document.querySelector<HTMLElement>(READ_SUBJECT);
+    if (!subjectEl) return null;
+    const fromEl = document.querySelector(READ_FROM);
+    const fromLabel = fromEl?.getAttribute("aria-label") ?? "";
+    const bodyEl = document.querySelector<HTMLElement>(READ_BODY);
+    let body = bodyEl?.innerText ?? "";
+    if (body.length > BODY_BUDGET) body = body.slice(0, BODY_BUDGET);
+    return {
+        mode: "read",
+        subject: subjectEl.innerText?.trim() ?? "",
+        from: fromLabel.replace(/^From:\s*/, "").trim() || null,
+        to: extractReadRecipients("To"),
+        cc: extractReadRecipients("Cc"),
+        bcc: [],
+        body,
+        attachments: extractReadAttachments(),
+        draftId: null,
+    };
+}
+
+function extractComposeSnapshot(): OutlookContentPayload | null {
+    const subjectEl = document.querySelector<HTMLInputElement>(SUBJECT_INPUT);
+    if (!subjectEl) return null;
+    const subject = subjectEl.value ?? "";
+    const bodyEl = document.querySelector<HTMLElement>(COMPOSE_EDITOR);
+    let body = bodyEl?.innerText ?? "";
+    if (body.length > BODY_BUDGET) body = body.slice(0, BODY_BUDGET);
+    return {
+        mode: detectComposeMode(subject),
+        subject,
+        from: null,
+        to: extractComposeRecipients("To"),
+        cc: extractComposeRecipients("Cc"),
+        bcc: extractComposeRecipients("Bcc"),
+        body,
+        attachments: extractComposeAttachments(),
+        draftId: extractDraftId(),
+    };
+}
+
+function extractSnapshot(): OutlookContentPayload | null {
+    return extractComposeSnapshot() ?? extractReadSnapshot();
+}
+
+function snapshotFingerprint(p: OutlookContentPayload): string {
+    return shortHash(p.subject + p.to.join(",") + p.body.slice(0, 2000));
 }
 
 // ── context resolution ───────────────────────────────────────────────
@@ -111,6 +229,34 @@ export const outlookAdapter: Adapter = (inner) => {
             return overlayCtx ?? currentCtx;
         }
 
+        // Layer 3: content snapshots
+        const seenContentHashes = new Set<string>();
+        let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+
+        function maybeSnapshot() {
+            const payload = extractSnapshot();
+            if (!payload) return;
+            const fp = snapshotFingerprint(payload);
+            if (seenContentHashes.has(fp)) return;
+            seenContentHashes.add(fp);
+            const cap: Capture = {
+                type: "outlook.content",
+                timestamp: Date.now(),
+                context: effectiveCtx(),
+                payload,
+            };
+            dev.log("adapter", "outlook.content", `mode=${payload.mode}`, cap);
+            sink(cap);
+        }
+
+        function scheduleSnapshot() {
+            if (snapshotTimer) clearTimeout(snapshotTimer);
+            snapshotTimer = setTimeout(() => {
+                snapshotTimer = null;
+                maybeSnapshot();
+            }, 30_000);
+        }
+
         function emitNavigate(prevCtx: string, newCtx: string) {
             const { folder, messageId } = parseOutlookUrl(
                 window.location.pathname,
@@ -138,6 +284,7 @@ export const outlookAdapter: Adapter = (inner) => {
             currentCtx = resolveContext(path);
             if (currentCtx !== prevCtx) {
                 emitNavigate(prevCtx, currentCtx);
+                scheduleSnapshot();
                 return true;
             }
             return false;
@@ -157,6 +304,7 @@ export const outlookAdapter: Adapter = (inner) => {
                     overlayMode = result.mode;
                     overlayDraftId = result.draftId;
                     emitNavigate(prevCtx, overlayCtx);
+                    scheduleSnapshot();
                 } else if (!result && overlayCtx) {
                     // Compose pane disappeared
                     const prevCtx = overlayCtx;
@@ -166,12 +314,20 @@ export const outlookAdapter: Adapter = (inner) => {
 
                     // Emit action capture
                     const actionCap: Capture = {
-                        type: action === "discard" ? "outlook.discard" : "outlook.send",
+                        type:
+                            action === "discard"
+                                ? "outlook.discard"
+                                : "outlook.send",
                         timestamp: Date.now(),
                         context: prevCtx,
                         payload: { mode: savedMode, draftId: savedDraftId },
                     };
-                    dev.log("adapter", actionCap.type, `${savedMode} ${savedDraftId ?? "(no id)"}`, actionCap);
+                    dev.log(
+                        "adapter",
+                        actionCap.type,
+                        `${savedMode} ${savedDraftId ?? "(no id)"}`,
+                        actionCap,
+                    );
                     sink(actionCap);
 
                     // Clear overlay state
@@ -182,18 +338,31 @@ export const outlookAdapter: Adapter = (inner) => {
 
                     // Emit navigate reverting to URL-based context
                     emitNavigate(prevCtx, currentCtx);
+                    scheduleSnapshot();
                 }
             }, 100);
         });
-        composeObserver.observe(document.body, { childList: true, subtree: true });
+        composeObserver.observe(document.body, {
+            childList: true,
+            subtree: true,
+        });
 
         // Layer 2: delegated click listener for send/discard
         const ac = new AbortController();
-        document.addEventListener("click", (e) => {
-            const target = e.target as HTMLElement;
-            if (target.closest(SEND_BTN)) pendingAction = "send";
-            else if (target.closest(DISCARD_BTN)) pendingAction = "discard";
-        }, { capture: true, signal: ac.signal });
+        document.addEventListener(
+            "click",
+            (e) => {
+                const target = e.target as HTMLElement;
+                if (target.closest(SEND_BTN)) {
+                    pendingAction = "send";
+                    maybeSnapshot();
+                } else if (target.closest(DISCARD_BTN)) {
+                    pendingAction = "discard";
+                    maybeSnapshot();
+                }
+            },
+            { capture: true, signal: ac.signal },
+        );
 
         // Proactive: poll for URL changes the tap won't see
         const pollTimer = setInterval(checkNavigation, POLL_MS);
@@ -214,6 +383,7 @@ export const outlookAdapter: Adapter = (inner) => {
             ac.abort();
             composeObserver.disconnect();
             if (settleTimer) clearTimeout(settleTimer);
+            if (snapshotTimer) clearTimeout(snapshotTimer);
             teardownInner();
         };
     };

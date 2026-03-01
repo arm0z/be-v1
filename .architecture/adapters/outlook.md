@@ -10,17 +10,17 @@ tap() → outlookAdapter() → normalizer() → relay()
 
 ## Implementation status
 
-| Feature                            | Status      | Notes                                                                                |
-| ---------------------------------- | ----------- | ------------------------------------------------------------------------------------ |
-| URL-based context rewriting        | **Done**    | `parseOutlookUrl()` + `shortHash()` + `resolveContext()`                             |
-| `outlook.navigate` event           | **Done**    | Emitted on URL change via poll + popstate + reactive check                           |
-| Internal SPA navigation tracking   | **Done**    | 300ms poll + popstate + reactive on each capture                                     |
-| Unsupported path fallback          | **Done**    | Unsupported paths (deleted/junk/archive/search/bare) fall back to `other` context    |
-| Registry consolidation             | **Done**    | Single route matching `outlook.office.com/mail/` and `outlook.(com\|live.com)/mail/` |
-| DOM-layer compose detection        | **Done**    | `MutationObserver` for compose pane appearance/disappearance                         |
-| Reply/forward mode detection       | **Done**    | Subject prefix parsing (`Re:` / `Fw:`)                                               |
-| `outlook.content` snapshot         | **Planned** | Structured email extraction (to/cc/bcc/subject/body)                                 |
-| `outlook.send` / `outlook.discard` | **Done**    | Send/Discard button click detection + inferred send fallback                         |
+| Feature                            | Status   | Notes                                                                                |
+| ---------------------------------- | -------- | ------------------------------------------------------------------------------------ |
+| URL-based context rewriting        | **Done** | `parseOutlookUrl()` + `shortHash()` + `resolveContext()`                             |
+| `outlook.navigate` event           | **Done** | Emitted on URL change via poll + popstate + reactive check                           |
+| Internal SPA navigation tracking   | **Done** | 300ms poll + popstate + reactive on each capture                                     |
+| Unsupported path fallback          | **Done** | Unsupported paths (deleted/junk/archive/search/bare) fall back to `other` context    |
+| Registry consolidation             | **Done** | Single route matching `outlook.office.com/mail/` and `outlook.(com\|live.com)/mail/` |
+| DOM-layer compose detection        | **Done** | `MutationObserver` for compose pane appearance/disappearance                         |
+| Reply/forward mode detection       | **Done** | Subject prefix parsing (`Re:` / `Fw:`)                                               |
+| `outlook.content` snapshot         | **Done** | Structured email extraction (to/cc/bcc/subject/body)                                 |
+| `outlook.send` / `outlook.discard` | **Done** | Send/Discard button click detection + inferred send fallback                         |
 
 ## Supported contexts
 
@@ -312,7 +312,7 @@ The observer should debounce by ~100ms to avoid reacting to intermediate DOM sta
 
 ---
 
-## `outlook.content` — email snapshot (planned)
+## `outlook.content` — email snapshot (implemented)
 
 Structured extraction of the email currently being viewed or composed. Analogous to the HTML adapter's `html.content` but produces structured JSON instead of raw HTML.
 
@@ -464,97 +464,35 @@ Notes:
 
 ### Snapshot triggers
 
-| #   | Trigger             | When                                                     | Delay        | Context | Notes                                                        |
-| --- | ------------------- | -------------------------------------------------------- | ------------ | ------- | ------------------------------------------------------------ |
-| T1  | Email opened (read) | `outlook.navigate` to `{folder}:{hash}` with no overlay  | 3s settle    | Read    | Captures the email the user is reading                       |
-| T2  | Compose opened      | `overlayCtx` set (compose/reply/forward detected)        | 2s settle    | Compose | Captures initial state; for replies includes quoted body     |
-| T3  | Before send         | `outlook.send` about to fire (compose pane disappearing) | Immediate    | Compose | Final email snapshot — most valuable for attribution         |
-| T4  | Before discard      | `outlook.discard` about to fire                          | Immediate    | Compose | Captures abandoned draft state (useful for time attribution) |
-| T5  | Periodic (compose)  | User is in compose overlay and interacting               | 60s interval | Compose | Captures evolving draft; skipped if content hasn't changed   |
+Two triggers, no periodic timers:
 
-**Why these five**: T1 gives us what the user was reading (context for time spent). T3 is the most critical — it's the final email content at send time. T2 captures the starting point (especially valuable for replies where the quoted body is context). T5 catches long compose sessions where the user may draft, leave, come back. T4 is cheap insurance for abandoned work.
-
-**What we skip**: No snapshot on every keystroke (too noisy), no periodic snapshots in read mode (email content doesn't change), no snapshot on context-away from read (T1 already captured it on arrival).
+1. **After every `emitNavigate()`** → `scheduleSnapshot()` starts a 30-second countdown. If a new navigate fires before the timer expires, the pending snapshot is cancelled and a new 30s countdown starts for the new context.
+2. **Send/discard click** → `maybeSnapshot()` fires immediately in the capture-phase click handler (before Outlook processes the click, so compose DOM is still intact).
 
 ### Deduplication
 
-To avoid duplicate snapshots when content hasn't changed (e.g. T5 fires but user hasn't typed):
+`Set<string>` of content hashes (FNV-1a fingerprint of subject + recipients + first 2KB of body). If the hash has been seen before in this adapter lifetime, the snapshot is skipped entirely. No per-context reset needed — the Set accumulates globally so revisiting the same email doesn't re-snapshot.
 
 ```typescript
-let lastSnapshotFingerprint: string | null = null;
+const seenContentHashes = new Set<string>();
 
 function snapshotFingerprint(p: OutlookContentPayload): string {
     return shortHash(p.subject + p.to.join(",") + p.body.slice(0, 2000));
 }
 
-function maybeSnapshot(trigger: string) {
-    const payload = extractSnapshot(); // builds OutlookContentPayload from DOM
+function maybeSnapshot() {
+    const payload = extractSnapshot();
     if (!payload) return;
     const fp = snapshotFingerprint(payload);
-    if (fp === lastSnapshotFingerprint) return; // skip duplicate
-    lastSnapshotFingerprint = fp;
-    dev.log("adapter", "outlook.content", `trigger=${trigger}`, payload);
-    sink({
-        type: "outlook.content",
-        timestamp: Date.now(),
-        context: effectiveCtx(),
-        payload,
-    });
+    if (seenContentHashes.has(fp)) return;
+    seenContentHashes.add(fp);
+    sink({ type: "outlook.content", timestamp: Date.now(), context: effectiveCtx(), payload });
 }
-```
 
-Reset `lastSnapshotFingerprint = null` on every context change so the first snapshot in a new context always fires.
-
-### Trigger implementation snippets
-
-**T1 — Email opened (read)**. In `checkNavigation()`, after `currentCtx` changes and no overlay is active:
-
-```typescript
-if (currentCtx !== prevCtx && !overlayCtx) {
-    emitNavigate(prevCtx, currentCtx);
-    // T1: snapshot after 3s settle
-    if (readSettleTimer) clearTimeout(readSettleTimer);
-    readSettleTimer = setTimeout(() => maybeSnapshot("read_settle"), 3000);
+function scheduleSnapshot() {
+    if (snapshotTimer) clearTimeout(snapshotTimer);
+    snapshotTimer = setTimeout(() => { snapshotTimer = null; maybeSnapshot(); }, 30_000);
 }
-```
-
-**T2 — Compose opened**. In the MutationObserver, after `overlayCtx` is set:
-
-```typescript
-if (result && !overlayCtx) {
-    overlayCtx = result.ctx;
-    // ... emit navigate ...
-    // T2: snapshot after 2s settle
-    if (composeSettleTimer) clearTimeout(composeSettleTimer);
-    composeSettleTimer = setTimeout(() => maybeSnapshot("compose_open"), 2000);
-    // T5: start periodic timer
-    composePeriodicTimer = setInterval(() => maybeSnapshot("compose_periodic"), 60_000);
-}
-```
-
-**T3/T4 — Before send/discard**. In the MutationObserver, when overlay disappears, before emitting the action:
-
-```typescript
-if (!result && overlayCtx) {
-    // T3/T4: snapshot final state before emitting action
-    maybeSnapshot(action === "discard" ? "pre_discard" : "pre_send");
-    // ... emit outlook.send/outlook.discard ...
-    // ... clear overlay state ...
-    // Stop T5 periodic
-    if (composePeriodicTimer) clearInterval(composePeriodicTimer);
-    lastSnapshotFingerprint = null; // reset for next context
-}
-```
-
-### Teardown additions for snapshot timers
-
-```typescript
-return () => {
-    // ... existing teardown ...
-    if (readSettleTimer) clearTimeout(readSettleTimer);
-    if (composeSettleTimer) clearTimeout(composeSettleTimer);
-    if (composePeriodicTimer) clearInterval(composePeriodicTimer);
-};
 ```
 
 ---
@@ -584,9 +522,9 @@ Emitted on every context change, including transitions to/from `other` (unsuppor
 
 Currently in `types.ts` as `OutlookNavigatePayload` and in the `Capture` union.
 
-### `outlook.content` (planned)
+### `outlook.content` (implemented)
 
-Structured email snapshot. See [outlook.content section above](#outlookcontent--email-snapshot-planned).
+Structured email snapshot. See [outlook.content section above](#outlookcontent--email-snapshot-implemented).
 
 ### `outlook.send` (implemented)
 
@@ -680,7 +618,7 @@ export interface OutlookDiscardPayload {
 }
 ```
 
-Planned:
+Implemented:
 
 ```typescript
 export interface OutlookContentPayload {
@@ -699,11 +637,9 @@ export interface OutlookContentPayload {
 In `Capture` union:
 
 ```typescript
-// Implemented
 | BaseCapture<"outlook.navigate", OutlookNavigatePayload>
 | BaseCapture<"outlook.send", OutlookSendPayload>
 | BaseCapture<"outlook.discard", OutlookDiscardPayload>
-// Planned
 | BaseCapture<"outlook.content", OutlookContentPayload>
 ```
 
@@ -717,6 +653,7 @@ return () => {
     ac.abort();                        // popstate + click listeners
     composeObserver.disconnect();      // MutationObserver for compose pane
     if (settleTimer) clearTimeout(settleTimer); // compose detection debounce
+    if (snapshotTimer) clearTimeout(snapshotTimer); // content snapshot countdown
     teardownInner();                   // inner tap cleanup
 };
 ```
@@ -743,7 +680,7 @@ Single consolidated route entry in `src/event/registry.ts`:
 | File                            | Role                                             | Status      |
 | ------------------------------- | ------------------------------------------------ | ----------- |
 | `src/event/adapters/outlook.ts` | Adapter — URL parsing, context rewriting, events | Implemented |
-| `src/event/types.ts`            | `OutlookNavigatePayload` + Capture union entry   | Implemented |
+| `src/event/types.ts`            | `Outlook*Payload` interfaces + Capture union     | Implemented |
 | `src/event/registry.ts`         | Route entry                                      | Implemented |
 
 ---
