@@ -2,8 +2,10 @@ import type { Capture } from "../event/types.ts";
 import type { DevChannel, DevEntry } from "../event/dev.ts";
 import { dev } from "../event/dev.ts";
 import { createAggregator } from "../aggregation/index.ts";
+import { createPacker } from "../aggregation/packer.ts";
 
 const aggregator = createAggregator();
+const packer = createPacker(aggregator);
 
 // ── Receive Captures from the Event Layer (port-based) ──────
 
@@ -244,6 +246,29 @@ chrome.downloads.onChanged.addListener((delta) => {
     });
 });
 
+// ── Packer flush trigger ────────────────────────────────────
+
+chrome.alarms.create("packer-flush", { periodInMinutes: 5 });
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name !== "packer-flush") return;
+    const packet = packer.flush();
+    if (packet) {
+        dev.log(
+            "sync",
+            "packet.ready",
+            `packet ${packet.id} ready (${packet.groups.length} groups)`,
+            {
+                packetId: packet.id,
+                groups: packet.groups.length,
+                edges: packet.edges.length,
+            },
+        );
+        // TODO: pass packet to syncing layer once implemented
+        // await sync(packet);
+    }
+});
+
 // ── DevHub (dev mode only) ──────────────────────────────────
 
 if (import.meta.env.DEV) {
@@ -345,6 +370,21 @@ if (import.meta.env.DEV) {
                 }
             }
         });
+    });
+
+    // Manual flush via dev message
+    chrome.runtime.onMessage.addListener((msg) => {
+        if (msg.type === "dev:flush") {
+            const packet = packer.flush();
+            dev.log(
+                "sync",
+                "packet.manual-flush",
+                packet ? `packet ${packet.id}` : "nothing to flush",
+                {
+                    packet: packet ?? null,
+                },
+            );
+        }
     });
 
     // Service worker's own dev.log calls go directly to receive(),

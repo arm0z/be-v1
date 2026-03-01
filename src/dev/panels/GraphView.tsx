@@ -9,11 +9,14 @@ import {
     Trash2,
     Waypoints,
 } from "lucide-react";
+import type { DirectedGraph, LouvainResult, PreprocessResult, Transition } from "@/aggregation/types";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { buildDirectedGraph, directedLouvain } from "@/aggregation/directed-louvain";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import type { DevEntry } from "@/event/dev";
+import { preprocess } from "@/aggregation/preprocess";
 
 type Props = { entries: DevEntry[]; onClear?: () => void };
 
@@ -40,23 +43,57 @@ const HIT_RADIUS = 16;
 const DOT_SPACING = 24;
 const MAX_DOTS = 5000;
 
-function extractOrigin(id: string): string | null {
-    try {
-        const url = new URL(id);
-        if (url.protocol !== "http:" && url.protocol !== "https:")
-            return url.protocol.replace(/:$/, "");
-        return url.host;
-    } catch {
-        return null;
-    }
-}
-
 function fmtTime(ts: number): string {
     return new Date(ts).toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
     });
+}
+
+const COMMUNITY_COLORS = [
+    "hsl(210, 80%, 60%)",
+    "hsl(150, 70%, 50%)",
+    "hsl(30, 90%, 60%)",
+    "hsl(280, 70%, 60%)",
+    "hsl(0, 80%, 60%)",
+    "hsl(60, 80%, 50%)",
+    "hsl(180, 70%, 50%)",
+    "hsl(330, 70%, 60%)",
+];
+
+function getCommunityColor(communityId: string, communityIds: string[]): string {
+    const index = communityIds.indexOf(communityId);
+    return COMMUNITY_COLORS[index % COMMUNITY_COLORS.length];
+}
+
+function convexHull(points: [number, number][]): [number, number][] {
+    if (points.length < 3) return points;
+    const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+
+    function cross(o: [number, number], a: [number, number], b: [number, number]): number {
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    }
+
+    const lower: [number, number][] = [];
+    for (const p of sorted) {
+        while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+            lower.pop();
+        }
+        lower.push(p);
+    }
+
+    const upper: [number, number][] = [];
+    for (const p of [...sorted].reverse()) {
+        while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+            upper.pop();
+        }
+        upper.push(p);
+    }
+
+    lower.pop();
+    upper.pop();
+    return lower.concat(upper);
 }
 
 export function GraphView({ entries, onClear }: Props) {
@@ -67,7 +104,6 @@ export function GraphView({ entries, onClear }: Props) {
 
     const nodesRef = useRef<Map<string, Node>>(new Map());
     const edgesRef = useRef<Map<string, Edge>>(new Map());
-    const urlsRef = useRef<Map<string, string>>(new Map());
     const processedRef = useRef(0);
 
     const panRef = useRef({ x: 0, y: 0 });
@@ -102,105 +138,197 @@ export function GraphView({ entries, onClear }: Props) {
     });
     const [physics, setPhysics] = useState({ ...physicsRef.current });
 
-    // --- data extraction ---
+    // Tunable algorithm parameters (side panel controls)
+    const [resolution, setResolution] = useState(1.0);
+    const [hubThreshold, setHubThreshold] = useState(0.1);
+    const [hubMinSources, setHubMinSources] = useState(15);
+    const [sentinelPassthroughMs, setSentinelPassthroughMs] = useState(2000);
+    const [sentinelBreakMs, setSentinelBreakMs] = useState(600000);
+    const [transientDwellMs, setTransientDwellMs] = useState(500);
+    const [targetPerChunk, setTargetPerChunk] = useState(4);
+
+    // Extract transitions from the latest snapshot
+    const latestTransitions = useMemo(() => {
+        for (let i = entries.length - 1; i >= 0; i--) {
+            const entry = entries[i];
+            if (entry.event === "state.snapshot" && entry.data) {
+                const snapshot = entry.data as { transitions?: Transition[] };
+                return snapshot.transitions ?? [];
+            }
+        }
+        return [];
+    }, [entries]);
+
+    // Compute grouped graph when in grouped mode
+    const groupedResultRef = useRef<{
+        pr: PreprocessResult;
+        graph: DirectedGraph;
+        louvain: LouvainResult;
+    } | null>(null);
+
+    const groupedResult = useMemo(() => {
+        if (activeTab !== "grouped" || latestTransitions.length === 0) {
+            groupedResultRef.current = null;
+            return null;
+        }
+
+        const pr = preprocess(latestTransitions, {
+            sentinelPassthroughMs,
+            sentinelBreakMs,
+            transientDwellMs,
+            hubThresholdPercent: hubThreshold,
+            hubMinSources,
+            targetPerChunk,
+        });
+
+        const graph = buildDirectedGraph(pr.transitions);
+        const louvain = directedLouvain(graph, resolution);
+
+        const result = { pr, graph, louvain };
+        groupedResultRef.current = result;
+        return result;
+    }, [
+        activeTab, latestTransitions,
+        resolution, hubThreshold, hubMinSources,
+        sentinelPassthroughMs, sentinelBreakMs,
+        transientDwellMs, targetPerChunk,
+    ]);
+
+    const activeTabRef = useRef(activeTab);
+    activeTabRef.current = activeTab;
+
+    // --- data extraction (snapshot-based rebuild, raw mode only) ---
     const processEntries = useCallback(() => {
         // entries were cleared — reset graph state
         if (entries.length < processedRef.current) {
             nodesRef.current.clear();
             edgesRef.current.clear();
-            urlsRef.current.clear();
             processedRef.current = 0;
         }
 
-        const nodes = nodesRef.current;
-        const edges = edgesRef.current;
-        let added = false;
+        // In grouped mode, data comes from the groupedResult effect
+        if (activeTabRef.current === "grouped") {
+            processedRef.current = entries.length;
+            return;
+        }
 
+        // Find the latest state.snapshot entry since last processed
+        type SnapshotData = {
+            transitions: { from: string; to: string; ts: number; dwellMs: number }[];
+        };
+        let latestSnapshot: SnapshotData | null = null;
         for (let i = processedRef.current; i < entries.length; i++) {
             const entry = entries[i];
-            if (entry.channel !== "graph") continue;
-
-            if (entry.event === "url.updated") {
-                const data = entry.data as
-                    | { source: string; url: string }
-                    | undefined;
-                if (data?.source && data?.url) {
-                    urlsRef.current.set(data.source, data.url);
-                }
-                continue;
-            }
-
-            const data = entry.data as
-                | { from: string; to: string; weight: number }
-                | undefined;
-            if (!data?.from || !data?.to) continue;
-            const ts = entry.timestamp;
-
-            if (entry.event === "edge.created") {
-                if (!nodes.has(data.from)) {
-                    const neighbor = nodes.get(data.to);
-                    nodes.set(data.from, {
-                        id: data.from,
-                        x: neighbor
-                            ? neighbor.x + (Math.random() - 0.5) * 60
-                            : (Math.random() - 0.5) * 200,
-                        y: neighbor
-                            ? neighbor.y + (Math.random() - 0.5) * 60
-                            : (Math.random() - 0.5) * 200,
-                        vx: 0,
-                        vy: 0,
-                        firstSeen: ts,
-                        lastSeen: ts,
-                    });
-                    added = true;
-                }
-                if (!nodes.has(data.to)) {
-                    const neighbor = nodes.get(data.from);
-                    nodes.set(data.to, {
-                        id: data.to,
-                        x: neighbor
-                            ? neighbor.x + (Math.random() - 0.5) * 60
-                            : (Math.random() - 0.5) * 200,
-                        y: neighbor
-                            ? neighbor.y + (Math.random() - 0.5) * 60
-                            : (Math.random() - 0.5) * 200,
-                        vx: 0,
-                        vy: 0,
-                        firstSeen: ts,
-                        lastSeen: ts,
-                    });
-                    added = true;
-                }
-                const key = `${data.from}->${data.to}`;
-                if (!edges.has(key)) {
-                    edges.set(key, {
-                        from: data.from,
-                        to: data.to,
-                        weight: data.weight,
-                    });
-                    added = true;
-                }
-                const fromNode = nodes.get(data.from);
-                if (fromNode && ts > fromNode.lastSeen) fromNode.lastSeen = ts;
-                const toNode = nodes.get(data.to);
-                if (toNode && ts > toNode.lastSeen) toNode.lastSeen = ts;
-            } else if (entry.event === "edge.incremented") {
-                const key = `${data.from}->${data.to}`;
-                const edge = edges.get(key);
-                if (edge) {
-                    edge.weight = data.weight;
-                    added = true;
-                }
-                const fromNode = nodes.get(data.from);
-                if (fromNode && ts > fromNode.lastSeen) fromNode.lastSeen = ts;
-                const toNode = nodes.get(data.to);
-                if (toNode && ts > toNode.lastSeen) toNode.lastSeen = ts;
+            if (entry.event === "state.snapshot" && entry.data) {
+                latestSnapshot = entry.data as SnapshotData;
             }
         }
 
         processedRef.current = entries.length;
-        if (added) awakeRef.current = true;
+        if (!latestSnapshot) return;
+
+        const transitions = latestSnapshot.transitions ?? [];
+
+        // Aggregate transitions into edges and collect node IDs
+        const newEdges = new Map<string, Edge>();
+        const nodeIds = new Set<string>();
+        for (const t of transitions) {
+            nodeIds.add(t.from);
+            nodeIds.add(t.to);
+            const key = `${t.from}->${t.to}`;
+            const existing = newEdges.get(key);
+            if (existing) {
+                existing.weight++;
+            } else {
+                newEdges.set(key, { from: t.from, to: t.to, weight: 1 });
+            }
+        }
+
+        // Update nodes — preserve positions for existing, add new ones near neighbors
+        const nodes = nodesRef.current;
+        const timestamp = Date.now();
+
+        // Remove nodes no longer in the transition set
+        for (const id of nodes.keys()) {
+            if (!nodeIds.has(id)) nodes.delete(id);
+        }
+
+        // Add new nodes, positioned near an existing neighbor if possible
+        for (const id of nodeIds) {
+            if (!nodes.has(id)) {
+                let nx = (Math.random() - 0.5) * 200;
+                let ny = (Math.random() - 0.5) * 200;
+                for (const t of transitions) {
+                    if (t.from === id && nodes.has(t.to)) {
+                        const neighbor = nodes.get(t.to)!;
+                        nx = neighbor.x + (Math.random() - 0.5) * 60;
+                        ny = neighbor.y + (Math.random() - 0.5) * 60;
+                        break;
+                    }
+                    if (t.to === id && nodes.has(t.from)) {
+                        const neighbor = nodes.get(t.from)!;
+                        nx = neighbor.x + (Math.random() - 0.5) * 60;
+                        ny = neighbor.y + (Math.random() - 0.5) * 60;
+                        break;
+                    }
+                }
+                nodes.set(id, {
+                    id,
+                    x: nx,
+                    y: ny,
+                    vx: 0,
+                    vy: 0,
+                    firstSeen: timestamp,
+                    lastSeen: timestamp,
+                });
+            } else {
+                nodes.get(id)!.lastSeen = timestamp;
+            }
+        }
+
+        edgesRef.current = newEdges;
+        awakeRef.current = true;
     }, [entries]);
+
+    // --- grouped mode: populate nodes/edges from Louvain result ---
+    useEffect(() => {
+        if (activeTab === "grouped" && groupedResult) {
+            const nodes = nodesRef.current;
+            const edges = edgesRef.current;
+            // Preserve existing node positions where possible
+            const oldPositions = new Map<string, { x: number; y: number }>();
+            for (const [id, node] of nodes) {
+                oldPositions.set(id, { x: node.x, y: node.y });
+            }
+
+            nodes.clear();
+            edges.clear();
+
+            for (const nodeId of groupedResult.graph.nodes) {
+                const old = oldPositions.get(nodeId);
+                nodes.set(nodeId, {
+                    id: nodeId,
+                    x: old?.x ?? (Math.random() - 0.5) * 200,
+                    y: old?.y ?? (Math.random() - 0.5) * 200,
+                    vx: 0, vy: 0,
+                    firstSeen: 0, lastSeen: 0,
+                });
+            }
+
+            for (const [key, weight] of groupedResult.graph.edges) {
+                const sep = key.indexOf("\0");
+                const from = key.slice(0, sep);
+                const to = key.slice(sep + 1);
+                edges.set(`${from}->${to}`, { from, to, weight });
+            }
+
+            awakeRef.current = true;
+        }
+        // When switching back to raw, force reprocessing
+        if (activeTab === "raw") {
+            processedRef.current = 0;
+        }
+    }, [activeTab, groupedResult]);
 
     // --- force simulation ---
     const tick = useCallback(() => {
@@ -313,6 +441,51 @@ export function GraphView({ entries, onClear }: Props) {
             }
         }
 
+        // --- community hulls (grouped mode) ---
+        const gr = groupedResultRef.current;
+        if (activeTabRef.current === "grouped" && gr) {
+            const uniqueCommunities = [...new Set(gr.louvain.communities.values())];
+
+            for (const communityId of uniqueCommunities) {
+                const communityNodes: Node[] = [];
+                for (const [nodeId, cId] of gr.louvain.communities) {
+                    if (cId === communityId) {
+                        const node = nodesRef.current.get(nodeId);
+                        if (node) communityNodes.push(node);
+                    }
+                }
+
+                if (communityNodes.length < 2) continue;
+
+                const hull = convexHull(communityNodes.map(n => [n.x, n.y]));
+                if (hull.length < 3) continue;
+
+                const color = getCommunityColor(communityId, uniqueCommunities);
+                const padding = 20;
+                const cx = hull.reduce((s, p) => s + p[0], 0) / hull.length;
+                const cy = hull.reduce((s, p) => s + p[1], 0) / hull.length;
+
+                const expanded = hull.map(([x, y]) => {
+                    const dx = x - cx;
+                    const dy = y - cy;
+                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                    return [x + (dx / dist) * padding, y + (dy / dist) * padding] as [number, number];
+                });
+
+                ctx.beginPath();
+                ctx.moveTo(expanded[0][0], expanded[0][1]);
+                for (let i = 1; i < expanded.length; i++) {
+                    ctx.lineTo(expanded[i][0], expanded[i][1]);
+                }
+                ctx.closePath();
+                ctx.fillStyle = color.replace(")", ", 0.08)").replace("hsl(", "hsla(");
+                ctx.fill();
+                ctx.strokeStyle = color.replace(")", ", 0.3)").replace("hsl(", "hsla(");
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+        }
+
         // --- edges ---
         const hoverId = hoverIdRef.current;
         const dim = dimRef.current && hoverId !== null;
@@ -417,13 +590,22 @@ export function GraphView({ entries, onClear }: Props) {
             const isDimmed = dim && !connectedSet.has(node.id);
             ctx.beginPath();
             ctx.arc(node.x, node.y, NODE_RADIUS, 0, Math.PI * 2);
-            ctx.fillStyle = isDimmed
-                ? "rgba(120,120,120,0.15)"
-                : isUnknown
-                  ? "rgba(120,120,120,0.4)"
-                  : isHovered
-                    ? "hsl(210, 90%, 68%)"
-                    : "hsl(210, 80%, 60%)";
+
+            if (isDimmed) {
+                ctx.fillStyle = "rgba(120,120,120,0.15)";
+            } else if (activeTabRef.current === "grouped" && gr) {
+                const communityId = gr.louvain.communities.get(node.id);
+                const uniqueCommunities = [...new Set(gr.louvain.communities.values())];
+                ctx.fillStyle = communityId
+                    ? getCommunityColor(communityId, uniqueCommunities)
+                    : "rgba(120,120,120,0.4)";
+            } else if (isUnknown) {
+                ctx.fillStyle = "rgba(120,120,120,0.4)";
+            } else if (isHovered) {
+                ctx.fillStyle = "hsl(210, 90%, 68%)";
+            } else {
+                ctx.fillStyle = "hsl(210, 80%, 60%)";
+            }
             ctx.fill();
 
             if (isUnknown) {
@@ -434,23 +616,14 @@ export function GraphView({ entries, onClear }: Props) {
                 ctx.setLineDash([]);
             }
 
-            // URL label then dimmed source (hidden for unconnected nodes in dim mode)
+            // Source ID label
             const showLabel = !dim || connectedSet.has(node.id);
-            const nodeUrl = urlsRef.current.get(node.id);
-            const origin = nodeUrl ? extractOrigin(nodeUrl) : "unknown";
             if (showLabel) {
                 ctx.textAlign = "center";
                 ctx.textBaseline = "top";
                 ctx.font = "11px sans-serif";
                 ctx.fillStyle = "rgba(220,220,220,0.9)";
-                ctx.fillText(
-                    origin ?? "origin",
-                    node.x,
-                    node.y + NODE_RADIUS + 4,
-                );
-                ctx.font = "9px sans-serif";
-                ctx.fillStyle = "rgba(140,140,140,0.4)";
-                ctx.fillText(node.id, node.x, node.y + NODE_RADIUS + 18);
+                ctx.fillText(node.id, node.x, node.y + NODE_RADIUS + 4);
             }
         }
 
@@ -462,7 +635,7 @@ export function GraphView({ entries, onClear }: Props) {
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
             ctx.fillText(
-                "No graph data yet \u2014 edges appear as events flow",
+                "No graph data yet \u2014 edges appear as transitions flow",
                 w / dpr / 2,
                 h / dpr / 2,
             );
@@ -735,7 +908,6 @@ export function GraphView({ entries, onClear }: Props) {
         const node = nodesRef.current.get(hoverNodeId);
         if (node) {
             const stats = getStats(hoverNodeId);
-            const fullUrl = urlsRef.current.get(node.id);
             tooltipContent = (
                 <div
                     ref={tooltipRef}
@@ -744,11 +916,6 @@ export function GraphView({ entries, onClear }: Props) {
                     <div className="truncate text-sm font-semibold">
                         {node.id}
                     </div>
-                    {fullUrl && (
-                        <div className="truncate text-muted-foreground">
-                            {fullUrl}
-                        </div>
-                    )}
 
                     <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-0.5 border-t border-border/30 pt-2">
                         <span className="text-muted-foreground">Degree</span>
@@ -774,32 +941,21 @@ export function GraphView({ entries, onClear }: Props) {
                             <span className="text-muted-foreground text-[10px] uppercase tracking-wide">
                                 Outbound
                             </span>
-                            {stats.outbound.map((e) => {
-                                const eUrl = urlsRef.current.get(e.to);
-                                const eOrigin = eUrl
-                                    ? extractOrigin(eUrl)
-                                    : null;
-                                return (
-                                    <div key={`o-${e.to}`}>
-                                        <div className="flex justify-between gap-2">
-                                            <span className="truncate text-muted-foreground">
-                                                <span className="text-blue-400">
-                                                    &rarr;
-                                                </span>{" "}
-                                                {e.to}
-                                            </span>
-                                            <span className="shrink-0 tabular-nums">
-                                                &times;{e.weight}
-                                            </span>
-                                        </div>
-                                        {eOrigin && (
-                                            <div className="truncate pl-4 text-muted-foreground/50">
-                                                {eOrigin}
-                                            </div>
-                                        )}
+                            {stats.outbound.map((e) => (
+                                <div key={`o-${e.to}`}>
+                                    <div className="flex justify-between gap-2">
+                                        <span className="truncate text-muted-foreground">
+                                            <span className="text-blue-400">
+                                                &rarr;
+                                            </span>{" "}
+                                            {e.to}
+                                        </span>
+                                        <span className="shrink-0 tabular-nums">
+                                            &times;{e.weight}
+                                        </span>
                                     </div>
-                                );
-                            })}
+                                </div>
+                            ))}
                         </div>
                     )}
                     {stats.inbound.length > 0 && (
@@ -807,32 +963,21 @@ export function GraphView({ entries, onClear }: Props) {
                             <span className="text-muted-foreground text-[10px] uppercase tracking-wide">
                                 Inbound
                             </span>
-                            {stats.inbound.map((e) => {
-                                const eUrl = urlsRef.current.get(e.from);
-                                const eOrigin = eUrl
-                                    ? extractOrigin(eUrl)
-                                    : null;
-                                return (
-                                    <div key={`i-${e.from}`}>
-                                        <div className="flex justify-between gap-2">
-                                            <span className="truncate text-muted-foreground">
-                                                <span className="text-emerald-400">
-                                                    &larr;
-                                                </span>{" "}
-                                                {e.from}
-                                            </span>
-                                            <span className="shrink-0 tabular-nums">
-                                                &times;{e.weight}
-                                            </span>
-                                        </div>
-                                        {eOrigin && (
-                                            <div className="truncate pl-4 text-muted-foreground/50">
-                                                {eOrigin}
-                                            </div>
-                                        )}
+                            {stats.inbound.map((e) => (
+                                <div key={`i-${e.from}`}>
+                                    <div className="flex justify-between gap-2">
+                                        <span className="truncate text-muted-foreground">
+                                            <span className="text-emerald-400">
+                                                &larr;
+                                            </span>{" "}
+                                            {e.from}
+                                        </span>
+                                        <span className="shrink-0 tabular-nums">
+                                            &times;{e.weight}
+                                        </span>
                                     </div>
-                                );
-                            })}
+                                </div>
+                            ))}
                         </div>
                     )}
 
@@ -1034,7 +1179,239 @@ export function GraphView({ entries, onClear }: Props) {
                 )}
             </div>
             {panelOpen && (
-                <div className="flex h-full w-72 shrink-0 flex-col border-l border-border bg-background" />
+                <div className="flex h-full w-72 shrink-0 flex-col border-l border-border bg-background">
+                    <div className="border-b border-border px-3 py-2">
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                            {activeTab === "grouped" ? "Algorithm Parameters" : "Graph Info"}
+                        </h3>
+                    </div>
+                    <div className="dev-scrollbar flex-1 overflow-y-auto p-3 space-y-4 text-xs">
+                        {activeTab === "grouped" ? (
+                            <>
+                                {/* Stats */}
+                                {groupedResult && (
+                                    <div className="space-y-2">
+                                        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                            Results
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                                            <span className="text-muted-foreground">Modularity</span>
+                                            <span className="text-right tabular-nums">
+                                                {groupedResult.louvain.modularity.toFixed(4)}
+                                            </span>
+                                            <span className="text-muted-foreground">Communities</span>
+                                            <span className="text-right tabular-nums">
+                                                {new Set(groupedResult.louvain.communities.values()).size}
+                                            </span>
+                                            <span className="text-muted-foreground">Nodes</span>
+                                            <span className="text-right tabular-nums">
+                                                {groupedResult.graph.nodes.size}
+                                            </span>
+                                            <span className="text-muted-foreground">Edges</span>
+                                            <span className="text-right tabular-nums">
+                                                {groupedResult.graph.edges.size}
+                                            </span>
+                                            <span className="text-muted-foreground">Hubs</span>
+                                            <span className="text-right tabular-nums">
+                                                {groupedResult.pr.hubSources.size}
+                                            </span>
+                                            <span className="text-muted-foreground">Sentinels</span>
+                                            <span className="text-right tabular-nums">
+                                                {groupedResult.pr.sentinelCount}
+                                            </span>
+                                            <span className="text-muted-foreground">Excluded</span>
+                                            <span className="text-right tabular-nums">
+                                                {groupedResult.pr.excludedSources.size}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="border-t border-border/50" />
+
+                                {/* Louvain */}
+                                <div className="space-y-2">
+                                    <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                        Louvain
+                                    </div>
+                                    <div>
+                                        <div className="flex justify-between text-muted-foreground">
+                                            <span>Resolution ({"\u03B3"})</span>
+                                            <span className="tabular-nums">{resolution.toFixed(2)}</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min={0.1} max={3.0} step={0.05}
+                                            value={resolution}
+                                            onChange={(e) => setResolution(Number(e.target.value))}
+                                            className="mt-0.5 h-1 w-full cursor-pointer appearance-none rounded bg-border accent-blue-500"
+                                        />
+                                        <div className="flex justify-between text-muted-foreground text-[10px]">
+                                            <span>0.1 (larger)</span>
+                                            <span>3.0 (smaller)</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="border-t border-border/50" />
+
+                                {/* Off-browser */}
+                                <div className="space-y-2">
+                                    <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                        Off-browser sentinel
+                                    </div>
+                                    <div>
+                                        <div className="flex justify-between text-muted-foreground">
+                                            <span>Pass-through</span>
+                                            <span className="tabular-nums">{(sentinelPassthroughMs / 1000).toFixed(1)}s</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min={500} max={10000} step={500}
+                                            value={sentinelPassthroughMs}
+                                            onChange={(e) => setSentinelPassthroughMs(Number(e.target.value))}
+                                            className="mt-0.5 h-1 w-full cursor-pointer appearance-none rounded bg-border accent-blue-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <div className="flex justify-between text-muted-foreground">
+                                            <span>Break boundary</span>
+                                            <span className="tabular-nums">{(sentinelBreakMs / 60000).toFixed(0)} min</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min={60000} max={1800000} step={60000}
+                                            value={sentinelBreakMs}
+                                            onChange={(e) => setSentinelBreakMs(Number(e.target.value))}
+                                            className="mt-0.5 h-1 w-full cursor-pointer appearance-none rounded bg-border accent-blue-500"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="border-t border-border/50" />
+
+                                {/* Transient */}
+                                <div className="space-y-2">
+                                    <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                        Transient detection
+                                    </div>
+                                    <div>
+                                        <div className="flex justify-between text-muted-foreground">
+                                            <span>Dwell threshold</span>
+                                            <span className="tabular-nums">{transientDwellMs}ms</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min={100} max={2000} step={100}
+                                            value={transientDwellMs}
+                                            onChange={(e) => setTransientDwellMs(Number(e.target.value))}
+                                            className="mt-0.5 h-1 w-full cursor-pointer appearance-none rounded bg-border accent-blue-500"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="border-t border-border/50" />
+
+                                {/* Hub detection */}
+                                <div className="space-y-2">
+                                    <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                        Hub detection
+                                    </div>
+                                    <div>
+                                        <div className="flex justify-between text-muted-foreground">
+                                            <span>Threshold</span>
+                                            <span className="tabular-nums">{(hubThreshold * 100).toFixed(0)}%</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min={0.05} max={0.5} step={0.01}
+                                            value={hubThreshold}
+                                            onChange={(e) => setHubThreshold(Number(e.target.value))}
+                                            className="mt-0.5 h-1 w-full cursor-pointer appearance-none rounded bg-border accent-blue-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <div className="flex justify-between text-muted-foreground">
+                                            <span>Min sources</span>
+                                            <span className="tabular-nums">{hubMinSources}</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min={3} max={30} step={1}
+                                            value={hubMinSources}
+                                            onChange={(e) => setHubMinSources(Number(e.target.value))}
+                                            className="mt-0.5 h-1 w-full cursor-pointer appearance-none rounded bg-border accent-blue-500"
+                                        />
+                                    </div>
+                                    <div>
+                                        <div className="flex justify-between text-muted-foreground">
+                                            <span>Target per chunk</span>
+                                            <span className="tabular-nums">{targetPerChunk}</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min={2} max={10} step={1}
+                                            value={targetPerChunk}
+                                            onChange={(e) => setTargetPerChunk(Number(e.target.value))}
+                                            className="mt-0.5 h-1 w-full cursor-pointer appearance-none rounded bg-border accent-blue-500"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="border-t border-border/50" />
+
+                                {/* Per-community breakdown */}
+                                {groupedResult && (
+                                    <div className="space-y-2">
+                                        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                            Communities
+                                        </div>
+                                        {(() => {
+                                            const communities = new Map<string, string[]>();
+                                            for (const [nodeId, communityId] of groupedResult.louvain.communities) {
+                                                let members = communities.get(communityId);
+                                                if (!members) {
+                                                    members = [];
+                                                    communities.set(communityId, members);
+                                                }
+                                                members.push(nodeId);
+                                            }
+                                            const uniqueCommunities = [...communities.keys()];
+
+                                            return [...communities.entries()].map(([communityId, members]) => (
+                                                <div key={communityId} className="rounded border border-border/50 p-2">
+                                                    <div className="flex items-center gap-2">
+                                                        <div
+                                                            className="h-2.5 w-2.5 rounded-full"
+                                                            style={{ backgroundColor: getCommunityColor(communityId, uniqueCommunities) }}
+                                                        />
+                                                        <span className="font-medium">{members.length} nodes</span>
+                                                    </div>
+                                                    <div className="mt-1 space-y-px">
+                                                        {members.map(id => (
+                                                            <div key={id} className="truncate text-muted-foreground">{id}</div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ));
+                                        })()}
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            /* Raw panel */
+                            <div className="space-y-3">
+                                <div>
+                                    <div className="text-muted-foreground">Transitions</div>
+                                    <div className="text-lg tabular-nums">{latestTransitions.length}</div>
+                                </div>
+                                <div>
+                                    <div className="text-muted-foreground">Nodes</div>
+                                    <div className="text-lg tabular-nums">{nodesRef.current.size}</div>
+                                </div>
+                                <div>
+                                    <div className="text-muted-foreground">Edges</div>
+                                    <div className="text-lg tabular-nums">{edgesRef.current.size}</div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
             )}
         </div>
     );

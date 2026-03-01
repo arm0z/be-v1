@@ -1,58 +1,40 @@
+import {
+    Braces,
+    ChevronsDownUp,
+    ChevronsUpDown,
+    ClipboardCopy,
+    Code2,
+    Layers,
+    LayoutList,
+    Trash2,
+} from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useCallback, useState } from "react";
+
+import { Button } from "@/components/ui/button";
+import type { DevCaptureSummary } from "@/event/dev";
 import type { DevEntry } from "@/event/dev";
 import type { DevStateSnapshot } from "@/event/dev";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { DevCaptureSummary } from "@/event/dev";
-import { Button } from "@/components/ui/button";
-import {
-	Braces,
-	ChevronsDownUp,
-	ChevronsUpDown,
-	ClipboardCopy,
-	Code2,
-	Layers,
-	LayoutList,
-	Trash2,
-} from "lucide-react";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function formatTime(ms: number): string {
-	return new Date(ms).toLocaleTimeString();
+    return new Date(ms).toLocaleTimeString();
 }
 
 function formatDuration(ms: number): string {
-	const s = Math.floor(ms / 1000);
-	if (s < 60) return `${s}s`;
-	const m = Math.floor(s / 60);
-	const rs = s % 60;
-	if (m < 60) return `${m}m ${rs}s`;
-	const h = Math.floor(m / 60);
-	const rm = m % 60;
-	return `${h}h ${rm}m`;
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    const rs = s % 60;
+    if (m < 60) return `${m}m ${rs}s`;
+    const h = Math.floor(m / 60);
+    const rm = m % 60;
+    return `${h}h ${rm}m`;
 }
 
-function truncateUrl(url: string, maxLen = 60): string {
-	let s = url.replace(/^https?:\/\//, "").replace(/^www\./, "");
-	if (s.length > maxLen) s = `${s.slice(0, maxLen)}...`;
-	return s;
-}
-
-function SourceLabel({
-	source,
-	urls,
-}: { source: string; urls: Record<string, string> }) {
-	const url = urls[source];
-	return (
-		<span>
-			<span className="font-mono">{source}</span>
-			{url && (
-				<span className="block text-xs text-muted-foreground/60">
-					{truncateUrl(url)}
-				</span>
-			)}
-		</span>
-	);
+function SourceLabel({ source }: { source: string }) {
+    return <span className="font-mono">{source}</span>;
 }
 
 // ── JSON Tree ────────────────────────────────────────────────────────
@@ -60,473 +42,468 @@ function SourceLabel({
 type TreeReset = number;
 
 function PrimitiveValue({ value }: { value: unknown }) {
-	if (value === null)
-		return <span className="text-muted-foreground italic">null</span>;
-	if (typeof value === "string")
-		return <span className="text-green-400">"{value}"</span>;
-	if (typeof value === "number")
-		return <span className="text-blue-400">{value}</span>;
-	if (typeof value === "boolean")
-		return <span className="text-amber-400">{String(value)}</span>;
-	return <span>{String(value)}</span>;
+    if (value === null)
+        return <span className="text-muted-foreground italic">null</span>;
+    if (typeof value === "string")
+        return <span className="text-green-400">"{value}"</span>;
+    if (typeof value === "number")
+        return <span className="text-blue-400">{value}</span>;
+    if (typeof value === "boolean")
+        return <span className="text-amber-400">{String(value)}</span>;
+    return <span>{String(value)}</span>;
 }
 
 function JsonNode({
-	label,
-	value,
-	depth = 0,
-	reset,
-}: { label?: string; value: unknown; depth?: number; reset: TreeReset }) {
-	const isObject = value !== null && typeof value === "object";
-	const isArray = Array.isArray(value);
+    label,
+    value,
+    depth = 0,
+    reset,
+}: {
+    label?: string;
+    value: unknown;
+    depth?: number;
+    reset: TreeReset;
+}) {
+    const isObject = value !== null && typeof value === "object";
+    const isArray = Array.isArray(value);
 
-	// reset encodes target state: even = collapse all, odd = expand all
-	const expandAll = reset % 2 === 1;
-	const defaultOpen = expandAll || depth < 2;
-	const [open, setOpen] = useState(defaultOpen);
-	// Re-sync when reset signal changes
-	const [prevReset, setPrevReset] = useState(reset);
-	if (reset !== prevReset) {
-		setPrevReset(reset);
-		setOpen(expandAll || depth < 2);
-	}
+    // reset encodes target state: even = collapse all, odd = expand all
+    const expandAll = reset % 2 === 1;
+    const defaultOpen = expandAll || depth < 2;
+    const [open, setOpen] = useState(defaultOpen);
+    // Re-sync when reset signal changes
+    const [prevReset, setPrevReset] = useState(reset);
+    if (reset !== prevReset) {
+        setPrevReset(reset);
+        setOpen(expandAll || depth < 2);
+    }
 
-	if (!isObject) {
-		return (
-			<div className="flex items-baseline gap-1.5 py-px">
-				{label != null && (
-					<span className="text-muted-foreground shrink-0">
-						{label}:
-					</span>
-				)}
-				<PrimitiveValue value={value} />
-			</div>
-		);
-	}
+    if (!isObject) {
+        return (
+            <div className="flex items-baseline gap-1.5 py-px">
+                {label != null && (
+                    <span className="text-muted-foreground shrink-0">
+                        {label}:
+                    </span>
+                )}
+                <PrimitiveValue value={value} />
+            </div>
+        );
+    }
 
-	const entries: [string, unknown][] = isArray
-		? value.map((v, i) => [String(i), v] as [string, unknown])
-		: Object.entries(value as Record<string, unknown>);
-	const summary = isArray ? `[${entries.length}]` : `{${entries.length}}`;
+    const entries: [string, unknown][] = isArray
+        ? value.map((v, i) => [String(i), v] as [string, unknown])
+        : Object.entries(value as Record<string, unknown>);
+    const summary = isArray ? `[${entries.length}]` : `{${entries.length}}`;
 
-	if (entries.length === 0) {
-		return (
-			<div className="flex items-baseline gap-1.5 py-px">
-				{label != null && (
-					<span className="text-muted-foreground shrink-0">
-						{label}:
-					</span>
-				)}
-				<span className="text-muted-foreground">
-					{isArray ? "[]" : "{}"}
-				</span>
-			</div>
-		);
-	}
+    if (entries.length === 0) {
+        return (
+            <div className="flex items-baseline gap-1.5 py-px">
+                {label != null && (
+                    <span className="text-muted-foreground shrink-0">
+                        {label}:
+                    </span>
+                )}
+                <span className="text-muted-foreground">
+                    {isArray ? "[]" : "{}"}
+                </span>
+            </div>
+        );
+    }
 
-	return (
-		<div>
-			<button
-				type="button"
-				onClick={() => setOpen(!open)}
-				className="flex items-baseline gap-1.5 py-px rounded px-1 -ml-1 hover:bg-muted/30"
-			>
-				<span className="text-muted-foreground text-[10px] w-2.5 shrink-0">
-					{open ? "▼" : "▶"}
-				</span>
-				{label != null && (
-					<span className="text-muted-foreground">{label}:</span>
-				)}
-				{!open && (
-					<span className="text-muted-foreground/60">{summary}</span>
-				)}
-			</button>
-			{open && (
-				<div className="ml-2 border-l border-border/50 pl-3">
-					{entries.map(([k, v]) => (
-						<JsonNode
-							key={k}
-							label={k}
-							value={v}
-							depth={depth + 1}
-							reset={reset}
-						/>
-					))}
-				</div>
-			)}
-		</div>
-	);
+    return (
+        <div>
+            <button
+                type="button"
+                onClick={() => setOpen(!open)}
+                className="flex items-baseline gap-1.5 py-px rounded px-1 -ml-1 hover:bg-muted/30"
+            >
+                <span className="text-muted-foreground text-[10px] w-2.5 shrink-0">
+                    {open ? "▼" : "▶"}
+                </span>
+                {label != null && (
+                    <span className="text-muted-foreground">{label}:</span>
+                )}
+                {!open && (
+                    <span className="text-muted-foreground/60">{summary}</span>
+                )}
+            </button>
+            {open && (
+                <div className="ml-2 border-l border-border/50 pl-3">
+                    {entries.map(([k, v]) => (
+                        <JsonNode
+                            key={k}
+                            label={k}
+                            value={v}
+                            depth={depth + 1}
+                            reset={reset}
+                        />
+                    ))}
+                </div>
+            )}
+        </div>
+    );
 }
 
 function JsonTreeView({ snapshot }: { snapshot: unknown }) {
-	// Even = collapsed (default depth<2), odd = expand all
-	const [reset, setReset] = useState(0);
-	const collapseAll = useCallback(
-		() => setReset((r) => (r % 2 === 0 ? r + 2 : r + 1)),
-		[],
-	);
-	const expandAll = useCallback(
-		() => setReset((r) => (r % 2 === 1 ? r + 2 : r + 1)),
-		[],
-	);
+    // Even = collapsed (default depth<2), odd = expand all
+    const [reset, setReset] = useState(0);
+    const collapseAll = useCallback(
+        () => setReset((r) => (r % 2 === 0 ? r + 2 : r + 1)),
+        [],
+    );
+    const expandAll = useCallback(
+        () => setReset((r) => (r % 2 === 1 ? r + 2 : r + 1)),
+        [],
+    );
 
-	return (
-		<div className="font-mono text-sm">
-			<div className="mb-3 flex items-center gap-1">
-				<button
-					type="button"
-					onClick={expandAll}
-					className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted/30 hover:text-foreground"
-				>
-					<ChevronsUpDown className="h-3 w-3" />
-					Expand all
-				</button>
-				<button
-					type="button"
-					onClick={collapseAll}
-					className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted/30 hover:text-foreground"
-				>
-					<ChevronsDownUp className="h-3 w-3" />
-					Collapse all
-				</button>
-			</div>
-			<JsonNode value={snapshot} reset={reset} />
-		</div>
-	);
+    return (
+        <div className="font-mono text-sm">
+            <div className="mb-3 flex items-center gap-1">
+                <button
+                    type="button"
+                    onClick={expandAll}
+                    className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted/30 hover:text-foreground"
+                >
+                    <ChevronsUpDown className="h-3 w-3" />
+                    Expand all
+                </button>
+                <button
+                    type="button"
+                    onClick={collapseAll}
+                    className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted/30 hover:text-foreground"
+                >
+                    <ChevronsDownUp className="h-3 w-3" />
+                    Collapse all
+                </button>
+            </div>
+            <JsonNode value={snapshot} reset={reset} />
+        </div>
+    );
 }
 
 // ── Formatted View ───────────────────────────────────────────────────
 
 function Row({ label, value }: { label: string; value: string }) {
-	return (
-		<div className="flex justify-between text-sm">
-			<span className="text-muted-foreground">{label}</span>
-			<span className="font-mono">{value}</span>
-		</div>
-	);
+    return (
+        <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">{label}</span>
+            <span className="font-mono">{value}</span>
+        </div>
+    );
 }
 
 type SealedBundle = DevStateSnapshot["sealedBundles"][number];
 
-function bundleToMarkdown(
-	b: SealedBundle,
-	i: number,
-	urls: Record<string, string>,
-): string {
-	const url = urls[b.source];
-	const lines = [`## Bundle #${i} — ${b.source}`];
-	if (url) lines.push(`**URL:** ${url}`);
-	lines.push(
-		`**Span:** ${formatTime(b.startedAt)} – ${b.endedAt ? formatTime(b.endedAt) : "..."}`,
-	);
-	if (b.endedAt)
-		lines.push(`**Duration:** ${formatDuration(b.endedAt - b.startedAt)}`);
-	lines.push(`**Captures:** ${b.captureCount}`);
-	if (b.text) lines.push("", "### Activity", "", b.text);
-	return lines.join("\n");
+function bundleToMarkdown(b: SealedBundle, i: number): string {
+    const lines = [`## Bundle #${i} — ${b.source}`];
+    lines.push(
+        `**Span:** ${formatTime(b.startedAt)} – ${b.endedAt ? formatTime(b.endedAt) : "..."}`,
+    );
+    if (b.endedAt)
+        lines.push(`**Duration:** ${formatDuration(b.endedAt - b.startedAt)}`);
+    lines.push(`**Captures:** ${b.captureCount}`);
+    if (b.text) lines.push("", "### Activity", "", b.text);
+    return lines.join("\n");
 }
 
 function CopyBundleButton({
-	bundle,
-	index,
-	urls,
-}: { bundle: SealedBundle; index: number; urls: Record<string, string> }) {
-	const [copied, setCopied] = useState(false);
-	return (
-		<button
-			type="button"
-			onClick={() => {
-				navigator.clipboard.writeText(
-					bundleToMarkdown(bundle, index, urls),
-				);
-				setCopied(true);
-				setTimeout(() => setCopied(false), 1500);
-			}}
-			className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted/30 hover:text-foreground"
-		>
-			<ClipboardCopy className="h-3 w-3" />
-			{copied ? "Copied" : "Copy"}
-		</button>
-	);
+    bundle,
+    index,
+}: {
+    bundle: SealedBundle;
+    index: number;
+}) {
+    const [copied, setCopied] = useState(false);
+    return (
+        <button
+            type="button"
+            onClick={() => {
+                navigator.clipboard.writeText(bundleToMarkdown(bundle, index));
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+            }}
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted/30 hover:text-foreground"
+        >
+            <ClipboardCopy className="h-3 w-3" />
+            {copied ? "Copied" : "Copy"}
+        </button>
+    );
 }
 
 function CapturesList({ captures }: { captures: DevCaptureSummary[] }) {
-	const [open, setOpen] = useState(false);
-	return (
-		<div>
-			<button
-				type="button"
-				onClick={() => setOpen(!open)}
-				className="flex items-center gap-1.5 text-sm"
-			>
-				<span className="text-[10px] text-muted-foreground">
-					{open ? "▼" : "▶"}
-				</span>
-				<span className="text-muted-foreground">Captures</span>
-				<span className="font-mono">{captures.length}</span>
-			</button>
-			{open && (
-				<div className="mt-1 ml-3 border-l border-border/50 pl-3">
-					{captures.map((c, j) => (
-						<div
-							key={`${c.timestamp}-${j}`}
-							className="flex items-baseline gap-3 py-px text-xs"
-						>
-							<span className="text-muted-foreground/60 font-mono">
-								{formatTime(c.timestamp)}
-							</span>
-							<span className="font-mono">{c.type}</span>
-						</div>
-					))}
-				</div>
-			)}
-		</div>
-	);
+    const [open, setOpen] = useState(false);
+    return (
+        <div>
+            <button
+                type="button"
+                onClick={() => setOpen(!open)}
+                className="flex items-center gap-1.5 text-sm"
+            >
+                <span className="text-[10px] text-muted-foreground">
+                    {open ? "▼" : "▶"}
+                </span>
+                <span className="text-muted-foreground">Captures</span>
+                <span className="font-mono">{captures.length}</span>
+            </button>
+            {open && (
+                <div className="mt-1 ml-3 border-l border-border/50 pl-3">
+                    {captures.map((c, j) => (
+                        <div
+                            key={`${c.timestamp}-${j}`}
+                            className="flex items-baseline gap-3 py-px text-xs"
+                        >
+                            <span className="text-muted-foreground/60 font-mono">
+                                {formatTime(c.timestamp)}
+                            </span>
+                            <span className="font-mono">{c.type}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
 }
 
 function FormattedState({ snapshot }: { snapshot: DevStateSnapshot }) {
-	const { urls } = snapshot;
-	const [showText, setShowText] = useState(true);
+    const [showText, setShowText] = useState(true);
 
-	return (
-		<div className="space-y-5">
-			{/* Active Source */}
-			<div className="flex items-center justify-between rounded-md border p-3 text-sm">
-				<span className="text-muted-foreground">Active Source</span>
-				{snapshot.activeSource ? (
-					<SourceLabel
-						source={snapshot.activeSource}
-						urls={urls}
-					/>
-				) : (
-					<span className="font-mono">—</span>
-				)}
-			</div>
+    return (
+        <div className="space-y-5">
+            {/* Active Source */}
+            <div className="flex items-center justify-between rounded-md border p-3 text-sm">
+                <span className="text-muted-foreground">Active Source</span>
+                {snapshot.activeSource ? (
+                    <SourceLabel source={snapshot.activeSource} />
+                ) : (
+                    <span className="font-mono">—</span>
+                )}
+            </div>
 
-			{/* Open Bundle */}
-			<section>
-				<h3 className="mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
-					Open Bundle
-				</h3>
-				{snapshot.openBundle ? (
-					<div className="overflow-hidden rounded-md border">
-						<div className="flex items-center gap-3 bg-muted/30 px-4 py-2">
-							<span className="text-green-400">●</span>
-							<SourceLabel
-								source={snapshot.openBundle.source}
-								urls={urls}
-							/>
-							<span className="ml-auto text-xs text-muted-foreground">
-								{formatDuration(
-									Date.now() -
-										snapshot.openBundle.startedAt,
-								)}
-							</span>
-						</div>
-						<div className="space-y-1 px-4 py-2">
-							<Row
-								label="Started"
-								value={formatTime(
-									snapshot.openBundle.startedAt,
-								)}
-							/>
-							<CapturesList
-								captures={snapshot.openBundle.captures}
-							/>
-						</div>
-					</div>
-				) : (
-					<p className="text-sm text-muted-foreground/60">None</p>
-				)}
-			</section>
+            {/* Open Bundle */}
+            <section>
+                <h3 className="mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+                    Open Bundle
+                </h3>
+                {snapshot.openBundle ? (
+                    <div className="overflow-hidden rounded-md border">
+                        <div className="flex items-center gap-3 bg-muted/30 px-4 py-2">
+                            <span className="text-green-400">●</span>
+                            <SourceLabel source={snapshot.openBundle.source} />
+                            <span className="ml-auto text-xs text-muted-foreground">
+                                {formatDuration(
+                                    Date.now() - snapshot.openBundle.startedAt,
+                                )}
+                            </span>
+                        </div>
+                        <div className="space-y-1 px-4 py-2">
+                            <Row
+                                label="Started"
+                                value={formatTime(
+                                    snapshot.openBundle.startedAt,
+                                )}
+                            />
+                            <CapturesList
+                                captures={snapshot.openBundle.captures}
+                            />
+                        </div>
+                    </div>
+                ) : (
+                    <p className="text-sm text-muted-foreground/60">None</p>
+                )}
+            </section>
 
-			{/* Sealed Bundles */}
-			<section>
-				<div className="mb-2 flex items-center justify-between">
-					<h3 className="text-[11px] uppercase tracking-wider text-muted-foreground">
-						Sealed Bundles{" "}
-						<span className="ml-1 text-blue-400">
-							{snapshot.sealedBundles.length}
-						</span>
-					</h3>
-					{snapshot.sealedBundles.some((b) => b.text) && (
-						<button
-							type="button"
-							onClick={() => setShowText((v) => !v)}
-							className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted/30 hover:text-foreground"
-						>
-							{showText ? (
-								<ChevronsDownUp className="h-3 w-3" />
-							) : (
-								<ChevronsUpDown className="h-3 w-3" />
-							)}
-							{showText ? "Collapse text" : "Expand text"}
-						</button>
-					)}
-				</div>
-				{snapshot.sealedBundles.length === 0 ? (
-					<p className="text-sm text-muted-foreground/60">None</p>
-				) : (
-					<div className="space-y-2">
-						{snapshot.sealedBundles.map((b, i) => (
-							<div
-								key={`${b.source}-${b.startedAt}`}
-								className="overflow-hidden rounded-md border"
-							>
-								<div className="flex items-center gap-3 bg-muted/20 px-4 py-2 text-sm">
-									<span className="text-muted-foreground">
-										#{i}
-									</span>
-									<SourceLabel
-										source={b.source}
-										urls={urls}
-									/>
-									<span className="ml-auto flex items-center gap-2 text-muted-foreground">
-										{b.captureCount} captures
-										<CopyBundleButton
-											bundle={b}
-											index={i}
-											urls={urls}
-										/>
-									</span>
-								</div>
-								<div className="space-y-1 border-t border-border/50 px-4 py-2">
-									<Row
-										label="Span"
-										value={`${formatTime(b.startedAt)} – ${b.endedAt ? formatTime(b.endedAt) : "..."}`}
-									/>
-									{b.endedAt && (
-										<Row
-											label="Duration"
-											value={formatDuration(
-												b.endedAt - b.startedAt,
-											)}
-										/>
-									)}
-									<CapturesList captures={b.captures} />
-									{b.text && showText && (
-										<pre className="mt-2 whitespace-pre-wrap break-words rounded bg-muted/20 p-2 text-xs text-muted-foreground/80">
-											{b.text}
-										</pre>
-									)}
-								</div>
-							</div>
-						))}
-					</div>
-				)}
-			</section>
+            {/* Sealed Bundles */}
+            <section>
+                <div className="mb-2 flex items-center justify-between">
+                    <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                        Sealed Bundles{" "}
+                        <span className="ml-1 text-blue-400">
+                            {snapshot.sealedBundles.length}
+                        </span>
+                    </h3>
+                    {snapshot.sealedBundles.some((b) => b.text) && (
+                        <button
+                            type="button"
+                            onClick={() => setShowText((v) => !v)}
+                            className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted/30 hover:text-foreground"
+                        >
+                            {showText ? (
+                                <ChevronsDownUp className="h-3 w-3" />
+                            ) : (
+                                <ChevronsUpDown className="h-3 w-3" />
+                            )}
+                            {showText ? "Collapse text" : "Expand text"}
+                        </button>
+                    )}
+                </div>
+                {snapshot.sealedBundles.length === 0 ? (
+                    <p className="text-sm text-muted-foreground/60">None</p>
+                ) : (
+                    <div className="space-y-2">
+                        {snapshot.sealedBundles.map((b, i) => (
+                            <div
+                                key={`${b.source}-${b.startedAt}`}
+                                className="overflow-hidden rounded-md border"
+                            >
+                                <div className="flex items-center gap-3 bg-muted/20 px-4 py-2 text-sm">
+                                    <span className="text-muted-foreground">
+                                        #{i}
+                                    </span>
+                                    <SourceLabel source={b.source} />
+                                    <span className="ml-auto flex items-center gap-2 text-muted-foreground">
+                                        {b.captureCount} captures
+                                        <CopyBundleButton
+                                            bundle={b}
+                                            index={i}
+                                        />
+                                    </span>
+                                </div>
+                                <div className="space-y-1 border-t border-border/50 px-4 py-2">
+                                    <Row
+                                        label="Span"
+                                        value={`${formatTime(b.startedAt)} – ${b.endedAt ? formatTime(b.endedAt) : "..."}`}
+                                    />
+                                    {b.endedAt && (
+                                        <Row
+                                            label="Duration"
+                                            value={formatDuration(
+                                                b.endedAt - b.startedAt,
+                                            )}
+                                        />
+                                    )}
+                                    <CapturesList captures={b.captures} />
+                                    {b.text && showText && (
+                                        <pre className="mt-2 whitespace-pre-wrap wrap-break-word rounded bg-muted/20 p-2 text-xs text-muted-foreground/80">
+                                            {b.text}
+                                        </pre>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </section>
 
-			{/* Edges */}
-			<section>
-				<h3 className="mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
-					Edges{" "}
-					<span className="ml-1 text-blue-400">
-						{snapshot.edges.length}
-					</span>
-				</h3>
-				{snapshot.edges.length === 0 ? (
-					<p className="text-sm text-muted-foreground/60">None</p>
-				) : (
-					<div className="divide-y divide-border/50 overflow-hidden rounded-md border text-sm">
-						{snapshot.edges.map((e) => (
-							<div
-								key={`${e.from}\0${e.to}`}
-								className="flex items-center gap-2 px-4 py-1.5"
-							>
-								<SourceLabel source={e.from} urls={urls} />
-								<span className="text-muted-foreground">
-									→
-								</span>
-								<SourceLabel source={e.to} urls={urls} />
-								<span className="ml-auto font-mono text-muted-foreground">
-									({e.weight})
-								</span>
-							</div>
-						))}
-					</div>
-				)}
-			</section>
-		</div>
-	);
+            {/* Transitions */}
+            <section>
+                <h3 className="mb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+                    Transitions{" "}
+                    <span className="ml-1 text-blue-400">
+                        {snapshot.transitions.length}
+                    </span>
+                </h3>
+                {snapshot.transitions.length === 0 ? (
+                    <p className="text-sm text-muted-foreground/60">None</p>
+                ) : (
+                    <div className="divide-y divide-border/50 overflow-hidden rounded-md border text-sm">
+                        {snapshot.transitions.map((t, i) => (
+                            <div
+                                key={`${t.from}\0${t.to}\0${t.ts}\0${i}`}
+                                className="flex items-center gap-2 px-4 py-1.5"
+                            >
+                                <SourceLabel source={t.from} />
+                                <span className="text-muted-foreground">→</span>
+                                <SourceLabel source={t.to} />
+                                <span className="ml-auto font-mono text-muted-foreground">
+                                    dwell: {t.dwellMs}ms, at: {formatTime(t.ts)}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </section>
+        </div>
+    );
 }
 
 // ── Main Component ───────────────────────────────────────────────────
 
-export function StateInspector({ entries, onClear }: { entries: DevEntry[]; onClear?: () => void }) {
-	const [view, setView] = useState("raw");
-	const [format, setFormat] = useState("formatted");
+export function StateInspector({
+    entries,
+    onClear,
+}: {
+    entries: DevEntry[];
+    onClear?: () => void;
+}) {
+    const [view, setView] = useState("raw");
+    const [format, setFormat] = useState("formatted");
 
-	let snapshot: unknown = null;
-	for (let i = entries.length - 1; i >= 0; i--) {
-		if (entries[i].event === "state.snapshot") {
-			snapshot = entries[i].data;
-			break;
-		}
-	}
+    let snapshot: unknown = null;
+    for (let i = entries.length - 1; i >= 0; i--) {
+        if (entries[i].event === "state.snapshot") {
+            snapshot = entries[i].data;
+            break;
+        }
+    }
 
-	return (
-		<div className="flex h-full flex-col overflow-hidden">
-			<div className="flex shrink-0 items-center justify-between px-4 pt-3">
-				<Tabs value={view} onValueChange={setView}>
-					<TabsList variant="line">
-						<TabsTrigger value="raw">
-							<Code2 className="h-3.5 w-3.5" />
-							Raw
-						</TabsTrigger>
-						<TabsTrigger value="grouped">
-							<Layers className="h-3.5 w-3.5" />
-							Grouped
-						</TabsTrigger>
-					</TabsList>
-				</Tabs>
-				<div className="flex items-center gap-2">
-					{view === "raw" && (
-						<Tabs value={format} onValueChange={setFormat}>
-							<TabsList className="h-auto border border-border bg-popover/80 p-0.5 backdrop-blur-sm">
-								<TabsTrigger value="formatted" className="h-auto px-2 py-0.5 text-xs">
-									<LayoutList className="size-3" />
-									Formatted
-								</TabsTrigger>
-								<TabsTrigger value="json" className="h-auto px-2 py-0.5 text-xs">
-									<Braces className="size-3" />
-									JSON
-								</TabsTrigger>
-							</TabsList>
-						</Tabs>
-					)}
-					{onClear && (
-						<Button
-							variant="ghost"
-							size="icon-xs"
-							onClick={onClear}
-							className="text-muted-foreground"
-							title="Clear all"
-						>
-							<Trash2 />
-						</Button>
-					)}
-				</div>
-			</div>
-			<div className="dev-scrollbar min-h-0 flex-1 overflow-auto p-4">
-				{!snapshot && (
-					<p className="text-sm text-muted-foreground">
-						No state snapshot received yet.
-					</p>
-				)}
-				{snapshot && view === "raw" && format === "json" && (
-					<JsonTreeView snapshot={snapshot} />
-				)}
-				{snapshot && view === "raw" && format === "formatted" && (
-					<FormattedState
-						snapshot={snapshot as DevStateSnapshot}
-					/>
-				)}
-				{view === "grouped" && (
-					<p className="text-sm text-muted-foreground">
-						Not implemented yet.
-					</p>
-				)}
-			</div>
-		</div>
-	);
+    return (
+        <div className="flex h-full flex-col overflow-hidden">
+            <div className="flex shrink-0 items-center justify-between px-4 pt-3">
+                <Tabs value={view} onValueChange={setView}>
+                    <TabsList variant="line">
+                        <TabsTrigger value="raw">
+                            <Code2 className="h-3.5 w-3.5" />
+                            Raw
+                        </TabsTrigger>
+                        <TabsTrigger value="grouped">
+                            <Layers className="h-3.5 w-3.5" />
+                            Grouped
+                        </TabsTrigger>
+                    </TabsList>
+                </Tabs>
+                <div className="flex items-center gap-2">
+                    {view === "raw" && (
+                        <Tabs value={format} onValueChange={setFormat}>
+                            <TabsList className="h-auto border border-border bg-popover/80 p-0.5 backdrop-blur-sm">
+                                <TabsTrigger
+                                    value="formatted"
+                                    className="h-auto px-2 py-0.5 text-xs"
+                                >
+                                    <LayoutList className="size-3" />
+                                    Formatted
+                                </TabsTrigger>
+                                <TabsTrigger
+                                    value="json"
+                                    className="h-auto px-2 py-0.5 text-xs"
+                                >
+                                    <Braces className="size-3" />
+                                    JSON
+                                </TabsTrigger>
+                            </TabsList>
+                        </Tabs>
+                    )}
+                    {onClear && (
+                        <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            onClick={onClear}
+                            className="text-muted-foreground"
+                            title="Clear all"
+                        >
+                            <Trash2 />
+                        </Button>
+                    )}
+                </div>
+            </div>
+            <div className="dev-scrollbar min-h-0 flex-1 overflow-auto p-4">
+                {!snapshot && (
+                    <p className="text-sm text-muted-foreground">
+                        No state snapshot received yet.
+                    </p>
+                )}
+                {!!snapshot && view === "raw" && format === "json" && (
+                    <JsonTreeView snapshot={snapshot} />
+                )}
+                {!!snapshot && view === "raw" && format === "formatted" && (
+                    <FormattedState snapshot={snapshot as DevStateSnapshot} />
+                )}
+                {view === "grouped" && (
+                    <p className="text-sm text-muted-foreground">
+                        Not implemented yet.
+                    </p>
+                )}
+            </div>
+        </div>
+    );
 }

@@ -2,9 +2,9 @@ import {
     needsSpaObserver,
     observeSpaNavigation,
 } from "../event/spa-observer.ts";
-import { setupVisibility } from "../event/visibility.ts";
 
 import { registry } from "../event/registry.ts";
+import { setupVisibility } from "../event/visibility.ts";
 
 function bootstrap(): void {
     // Visibility tracking runs on every tab, regardless of route matching

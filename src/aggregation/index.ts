@@ -3,26 +3,10 @@ import type { Capture, Signal } from "../event/types.ts";
 import type { Aggregator } from "./types.ts";
 import { OFF_BROWSER } from "./types.ts";
 import { createBundler } from "./bundler.ts";
-import { createGraph } from "./graph.ts";
 import { dev } from "../event/dev.ts";
 
-function signalPageUrl(signal: Signal): string | undefined {
-    switch (signal.type) {
-        case "nav.completed":
-        case "nav.spa":
-        case "nav.title_changed":
-        case "tab.created":
-        case "attention.active":
-        case "attention.visible":
-            return signal.payload.url || undefined;
-        default:
-            return undefined;
-    }
-}
-
 export function createAggregator(): Aggregator {
-    const graph = createGraph();
-    const bundler = createBundler(graph);
+    const bundler = createBundler();
     const tabSources = new Map<string, string>();
     const pendingSignals = new Map<
         string,
@@ -48,8 +32,7 @@ export function createAggregator(): Aggregator {
                     timestamp: c.timestamp,
                 })),
             })),
-            edges: graph.getEdges(),
-            urls: graph.getUrls(),
+            transitions: bundler.getTransitions(),
         });
     }
 
@@ -60,8 +43,6 @@ export function createAggregator(): Aggregator {
         for (const p of pending) {
             const stamped = { ...p.signal, tabId: p.tabId, source };
             bundler.ingestSignal(stamped);
-            const url = signalPageUrl(p.signal);
-            if (url) graph.recordUrl(source, url);
         }
     }
 
@@ -121,9 +102,6 @@ export function createAggregator(): Aggregator {
         });
         const stamped = { ...signal, tabId, source };
         bundler.ingestSignal(stamped);
-
-        const url = signalPageUrl(signal);
-        if (url) graph.recordUrl(source, url);
 
         if (signal.type === "tab.closed") {
             tabSources.delete(tabId);
@@ -189,11 +167,9 @@ export function createAggregator(): Aggregator {
         ingestSignal,
         onVisibilityChanged,
         getSealed: bundler.getSealed,
-        getEdges: graph.getEdges,
         drainSealed: bundler.drainSealed,
-        drainEdges: () => {
-            bundler.commitPending();
-            return graph.drainEdges();
-        },
+        getTransitions: bundler.getTransitions,
+        drainTransitions: bundler.drainTransitions,
+        seal: bundler.seal,
     };
 }

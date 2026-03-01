@@ -146,7 +146,11 @@ function RightActions({
 
     return (
         <div ref={ref} className="relative flex items-center gap-0.5 pr-1">
-            <button className={btnCls} onClick={toggleMaximize} title={maximized ? "Restore" : "Maximize"}>
+            <button
+                className={btnCls}
+                onClick={toggleMaximize}
+                title={maximized ? "Restore" : "Maximize"}
+            >
                 {maximized ? (
                     <Minimize2 className="h-3.5 w-3.5 text-neutral-400" />
                 ) : (
@@ -156,10 +160,7 @@ function RightActions({
             <button className={btnCls} onClick={popOut} title="Pop out">
                 <ExternalLink className="h-3.5 w-3.5 text-neutral-400" />
             </button>
-            <button
-                className={btnCls}
-                onClick={() => setOpen((o) => !o)}
-            >
+            <button className={btnCls} onClick={() => setOpen((o) => !o)}>
                 <Menu className="h-3.5 w-3.5 text-neutral-400" />
             </button>
             {open && (

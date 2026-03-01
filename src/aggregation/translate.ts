@@ -102,9 +102,13 @@ function translateEntry(c: BundleEntry): string | null {
         case "attention.active":
             return `switched to tab: "${c.payload.title}" (${truncate(c.payload.url, 40)})`;
         case "attention.visible":
-            return c.payload.visible ? `browser gained focus` : `browser lost focus`;
+            return c.payload.visible
+                ? `browser gained focus`
+                : `browser lost focus`;
         case "media.audio":
-            return c.payload.audible ? `audio started playing` : `audio stopped`;
+            return c.payload.audible
+                ? `audio started playing`
+                : `audio stopped`;
         case "media.download":
             return `downloaded "${c.payload.filename}" (${c.payload.state})`;
 

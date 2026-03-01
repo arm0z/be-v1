@@ -99,7 +99,11 @@ export const scrollNormalizer: NormalizerFn = (inner) => {
                 "normalizer",
                 "input.scroll.flush",
                 `scroll settled at ${Math.round(last.payload.percent * 100)}% (dropped ${dropped})`,
-                { scrollY: last.payload.scrollY, percent: last.payload.percent, dropped },
+                {
+                    scrollY: last.payload.scrollY,
+                    percent: last.payload.percent,
+                    dropped,
+                },
             );
             sink(last);
             last = null;

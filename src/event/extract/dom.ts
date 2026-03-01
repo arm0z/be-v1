@@ -6,8 +6,8 @@
  * lists, tables, links, and code blocks.
  */
 
-import { gfm } from "@joplin/turndown-plugin-gfm";
 import TurndownService from "turndown";
+import { gfm } from "@joplin/turndown-plugin-gfm";
 import { isSensitiveField } from "../dom-utils.ts";
 
 // ── boilerplate selectors ────────────────────────────────────────────
@@ -186,8 +186,14 @@ function pruneToViewport(liveBody: HTMLElement, clone: HTMLElement): void {
     const vpW = window.innerWidth;
     const vpH = window.innerHeight;
 
-    const liveWalker = document.createTreeWalker(liveBody, NodeFilter.SHOW_ELEMENT);
-    const cloneWalker = document.createTreeWalker(clone, NodeFilter.SHOW_ELEMENT);
+    const liveWalker = document.createTreeWalker(
+        liveBody,
+        NodeFilter.SHOW_ELEMENT,
+    );
+    const cloneWalker = document.createTreeWalker(
+        clone,
+        NodeFilter.SHOW_ELEMENT,
+    );
 
     const keep = new Set<Element>();
     keep.add(clone);
