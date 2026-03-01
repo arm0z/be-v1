@@ -78,7 +78,7 @@ type Packet = {
 
 ## Operations
 
-### `flush(): Packet`
+### `flush(): Packet | null`
 
 The single entry point. Called by whoever decides it's time to sync — a timer, an event count threshold, a manual trigger, or the persistence layer during recovery.
 

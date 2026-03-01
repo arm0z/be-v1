@@ -36,7 +36,7 @@ Translation happens **at seal time** — when the bundler closes a bundle (tab s
 ### Algorithm
 
 1. If the bundle has zero entries, return `""` (empty bundles are valid — rapid tab switches can produce them).
-2. For each `BundleEntry` (a `StampedCapture` or `StampedSignal`) in the bundle, call `translateEntry(entry)` which switches on `entry.type` and returns a human-readable action string, or `null` for unhandled types.
+2. For each `BundleEntry` (a `StampedCapture` or `StampedSignal`) in the bundle, call `translateEntry(c)` which switches on `c.type` and returns a human-readable action string, or `null` for unhandled types.
 3. Non-null results are prefixed with `[HH:MM:SS]` (local time from `entry.timestamp`) and joined with newlines.
 
 ### Truncation
@@ -46,7 +46,7 @@ A `truncate(str, length, opts?)` helper keeps long strings manageable:
 - **End truncation** (default): `truncate("long string", 40)` → `"long stri…"`
 - **Center truncation** (`{ fromCenter: true }`): `truncate("long string", 500, { fromCenter: true })` → `"long[…]ring"` — preserves the start and end of the string, cuts the middle.
 
-Truncation is applied to URLs/hrefs (40 chars, end), selected text (500 chars, center), and form field values (500 chars center for long values, 50 chars end for short values like `form_change`). Page and file text content is **not** truncated — the full text body is preserved for LLM consumption.
+Truncation is applied to URLs/hrefs (40 chars, end), selected text (500 chars, center), and form field values. Within form field rendering (`formatField`), `selectedText` uses 50 chars end truncation and `value` uses 500 chars center truncation. `form_change` values use 50 chars end. Page and file text content is **not** truncated — the full text body is preserved for LLM consumption.
 
 ### Form field formatting
 
@@ -58,21 +58,22 @@ Field value display follows a priority chain: redacted → checked/unchecked →
 
 Each capture type maps to a specific text format:
 
-| Capture type            | Output format                                                                     | Truncation                     |
-| ----------------------- | --------------------------------------------------------------------------------- | ------------------------------ |
-| `input.keystroke_batch` | `typed "text"`                                                                    | none                           |
-| `input.click`           | `clicked "text" (truncated-href…)` or `clicked "text"`                            | href: 40 chars end             |
-| `input.double_click`    | `double-clicked "text"`                                                           | none                           |
-| `input.context_menu`    | `right-clicked "text"`                                                            | none                           |
-| `input.scroll`          | `scrolled to N%`                                                                  | none                           |
-| `input.selection`       | `selected "start[…]end"`                                                          | text: 500 chars center         |
-| `input.copy`            | `copied (N chars)`                                                                | none (payload has length only) |
-| `input.paste`           | `pasted (N chars) into tag`                                                       | none (payload has length only) |
-| `input.form_focus`      | `focused name\n  field1: "val"\n  field2: "val"` (field list if snapshot present) | field values: 500 chars center |
-| `input.form_change`     | `changed tag to "truncated-val…"` or `changed tag to [redacted]`                  | value: 50 chars end            |
-| `input.form_submit`     | `submitted form (N fields) → truncated-action…`                                   | action URL: 40 chars end       |
-| `html.content`          | `page: "title" - full text body`                                                  | none (full text preserved)     |
-| `file.content`          | `file: truncated-url… - full text body`                                           | url: 40 chars end, text: none  |
+| Capture type            | Output format                                                                     | Truncation                              |
+| ----------------------- | --------------------------------------------------------------------------------- | --------------------------------------- |
+| `input.keystroke_batch` | `typed "text"`                                                                    | none                                    |
+| `input.keystroke`       | `pressed Ctrl+Alt+key` (modifier prefixes + key)                                  | none                                    |
+| `input.click`           | `clicked "text" (truncated-href…)` or `clicked "text"`                            | href: 40 chars end                      |
+| `input.double_click`    | `double-clicked "text"`                                                           | none                                    |
+| `input.context_menu`    | `right-clicked "text"`                                                            | none                                    |
+| `input.scroll`          | `scrolled to N%`                                                                  | none                                    |
+| `input.selection`       | `selected "start[…]end"`                                                          | text: 500 chars center                  |
+| `input.copy`            | `copied (N chars)`                                                                | none (payload has length only)          |
+| `input.paste`           | `pasted (N chars) into tag`                                                       | none (payload has length only)          |
+| `input.form_focus`      | `focused name\n  field1: "val"\n  field2: "val"` (field list if snapshot present) | selectedText: 50 end, value: 500 center |
+| `input.form_change`     | `changed tag to "truncated-val…"` or `changed tag to [redacted]`                  | value: 50 chars end                     |
+| `input.form_submit`     | `submitted form (N fields) → truncated-action…`                                   | action URL: 40 chars end                |
+| `html.content`          | `page: "title" - full text body`                                                  | none (full text preserved)              |
+| `file.content`          | `file: truncated-url… - full text body`                                           | url: 40 chars end, text: none           |
 
 #### Signal types (service-worker-originated)
 
@@ -88,7 +89,7 @@ Each capture type maps to a specific text format:
 | `media.audio`       | `audio started playing` / `audio stopped`     | none              |
 | `media.download`    | `downloaded "filename" (state)`               | none              |
 
-Types not in these tables (`input.keystroke`, `input.composition`) return `null` and are silently skipped. These raw types are normally consumed by the normalizer before reaching the service worker, but the translator handles the edge case gracefully.
+Types not in these tables (`input.composition`) return `null` and are silently skipped. `input.keystroke` has an explicit handler (see table above) since non-printable/modified keystrokes pass through the normalizer without being batched. `input.composition` is consumed by the normalizer and should not reach the bundler, but returns `null` gracefully if it does.
 
 ### Example output
 
@@ -113,7 +114,7 @@ Types not in these tables (`input.keystroke`, `input.composition`) return `null`
 - **Form field rendering.** When a form snapshot is available on `input.form_focus`, each field is rendered on its own line with its current value. Forms with more than 10 fields show the first 5 and last 5 with a truncation marker.
 - **Redaction passthrough.** `input.form_change` and form field rendering respect the `redacted` flag set by the tap layer (for passwords, credit cards, etc.) and output `[redacted]` instead of the value.
 - **Null-safe target text.** Click targets use `text ?? ""` because some elements (e.g. icon buttons, images) have no text content.
-- **Form focus fallback chain.** Uses `label → name → placeholder → tag` to find the most descriptive label for a form field.
+- **Form focus fallback chain.** Two separate chains: the entry-level label in `translateEntry` uses `name → placeholder → tag` (from the focused element's target). The per-field labels in `formatField` use `label → name → placeholder → tag` (from `FormFieldInfo`, where `label` is the `<label>` text).
 
 ## Call site
 
@@ -129,28 +130,27 @@ The bundler imports `translate` and calls it when sealing a bundle. The result i
 
 ## File map
 
-| File                                                              | Role                                                                                                              |
-| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| [`src/aggregation/translate.ts`](../src/aggregation/translate.ts) | `translate(bundle)` and `translateCapture(capture)` — pure functions, imports `FormFieldInfo` for field rendering |
-| [`src/aggregation/types.ts`](../src/aggregation/types.ts)         | `Bundle`, `BundleEntry`, `StampedCapture`, `StampedSignal` type definitions consumed by translate                 |
-| [`src/aggregation/bundler.ts`](../src/aggregation/bundler.ts)     | Only call site — `seal()` calls `translate(openBundle)`                                                           |
-| [`src/event/types.ts`](../src/event/types.ts)                     | `Capture` discriminated union and all payload interfaces that translate switches on                               |
+| File                                                              | Role                                                                                                      |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| [`src/aggregation/translate.ts`](../src/aggregation/translate.ts) | `translate(bundle)` and `translateEntry(c)` — pure functions, imports `FormFieldInfo` for field rendering |
+| [`src/aggregation/types.ts`](../src/aggregation/types.ts)         | `Bundle`, `BundleEntry`, `StampedCapture`, `StampedSignal` type definitions consumed by translate         |
+| [`src/aggregation/bundler.ts`](../src/aggregation/bundler.ts)     | Only call site — `seal()` calls `translate(openBundle)`                                                   |
+| [`src/event/types.ts`](../src/event/types.ts)                     | `Capture` discriminated union and all payload interfaces that translate switches on                       |
 
 ## Relationship to the aggregation layer
 
 ```text
-types.ts          ← StampedCapture, StampedSignal, BundleEntry, Bundle, Edge, UNKNOWN, Aggregator interface
+types.ts          ← StampedCapture, StampedSignal, BundleEntry, Bundle, Transition, UNKNOWN, Aggregator interface
 translate.ts      ← Bundle → string (this doc)
-graph.ts          ← closure-based edge tracking (source → source transitions)
 bundler.ts        ← state machine: ingest / ingestSignal / seal / transition (calls translate on seal)
-index.ts          ← createAggregator() composes bundler + graph, stamps captures + signals, routes attention events
+index.ts          ← createAggregator() composes bundler, stamps captures + signals, routes visibility events
 ```
 
 The aggregator is wired into the service worker at [`src/background/main.ts`](../src/background/main.ts):
 
 - Capture port handler calls `aggregator.ingest(capture, tabId)`
-- Chrome API listeners call `aggregator.ingestSignal(signal, tabId)` for 9 signal types (nav, tab, attention, media)
-- `chrome.tabs.onActivated` calls `aggregator.onTabActivated()` (seals current bundle)
-- `chrome.windows.onFocusChanged` calls `aggregator.onWindowFocusChanged(windowId)` (transitions to `"unknown"` on blur, seals on refocus)
+- Chrome API listeners call `aggregator.ingestSignal(signal, tabId)` for signal types (nav, tab, media)
+- Content script `page:visibility` handler calls `aggregator.onVisibilityChanged(tabId, visible)` — drives navigation transitions
+- `aggregator.onOffBrowser(cb)` manages idle sync alarms
 
-Dev panel events for the aggregation layer are registered in [`src/dev/panels/FilterToggles.tsx`](../src/dev/panels/FilterToggles.tsx) under the `AGGREGATOR` and `GRAPH` groups.
+Dev panel events for the aggregation layer are registered in [`src/dev/panels/FilterToggles.tsx`](../src/dev/panels/FilterToggles.tsx) under the `AGGREGATOR` group.

@@ -55,7 +55,7 @@ The aggregator maintains one piece of state: `visibleTabId: string | null`.
 - `visible: true` — Cancel any off-browser timer. Set `visibleTabId`. Resolve source (`tabSources.get(tabId) ?? root@{tabId}`). If source differs from bundler's active source, call `bundler.transition(source)`.
 - `visible: false` — Only acts if `tabId === visibleTabId`. Clears `visibleTabId`, starts the off-browser settle timer.
 
-**Off-browser settle timer** (`OFF_BROWSER_SETTLE_MS = 500ms`):
+**Off-browser settle timer** (`OFF_BROWSER_SETTLE_MS = 1000ms`):
 When a tab reports hidden, the timer starts. If another tab reports visible within the window, the timer is cancelled and navigation goes directly to the new tab. If the timer fires, `bundler.transition(OFF_BROWSER)` runs.
 
 This handles the natural gap during tab switches: old tab fires `blur`/hidden before the new tab fires `focus`/visible.
@@ -104,9 +104,9 @@ Graph (graph.ts)
 | Tab switch (same window)         | Old tab: `visibilitychange` hidden. New tab: `visibilitychange` visible. Direct transition, no off_browser.                                                                                 |
 | Window switch (both visible)     | Old window: `blur`. New window: `focus`. Direct transition via focus/blur signals.                                                                                                          |
 | Alt-tab away from Chrome         | Active tab: `blur` + `visibilitychange` hidden. Off-browser timer starts.                                                                                                                   |
-| Alt-tab back within 500ms        | Active tab: `focus` + `visibilitychange` visible. Timer cancelled, no off_browser transition.                                                                                               |
-| Alt-tab back after 500ms         | Timer fired, off_browser committed. Then tab visible, transition to tab. Dwell may collapse off_browser if total time < 1000ms.                                                             |
+| Alt-tab back within 1000ms       | Active tab: `focus` + `visibilitychange` visible. Timer cancelled, no off_browser transition.                                                                                               |
+| Alt-tab back after 1000ms        | Timer fired, off_browser committed. Then tab visible, transition to tab. Dwell may collapse off_browser if total time < 1000ms.                                                             |
 | New tab created (drag URL)       | Old tab hidden. New tab content script loads (takes ~1s). Off-browser timer may fire. Dwell mechanism collapses off_browser if new tab arrives within 1000ms of the off_browser transition. |
 | Tab closed while visible         | `tab.closed` signal clears visibleTabId, starts off-browser timer. Next tab's content script fires visible.                                                                                 |
 | Chrome internal page (chrome://) | No content script. Treated as off_browser (no visibility message arrives).                                                                                                                  |
-| Iframe click                     | Top frame `blur` fires, sends `visible: false`. Off-browser timer starts. If user stays in iframe > 500ms, off_browser commits. Trade-off accepted for simplicity.                          |
+| Iframe click                     | Top frame `blur` fires, sends `visible: false`. Off-browser timer starts. If user stays in iframe > 1000ms, off_browser commits. Trade-off accepted for simplicity.                         |
