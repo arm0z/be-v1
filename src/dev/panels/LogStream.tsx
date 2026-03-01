@@ -12,6 +12,7 @@ import {
 	Search,
 	SlidersHorizontal,
 
+	Trash2,
 	X,
 } from "lucide-react";
 import {
@@ -32,6 +33,7 @@ const ALL_CHANNELS: DevChannel[] = [
 	"relay",
 	"aggregator",
 	"graph",
+	"navigation",
 	"sync",
 	"persistence",
 ];
@@ -43,6 +45,7 @@ const CHANNEL_CLASSES: Record<DevChannel, string> = {
 	relay: "border-rose-500/50 bg-rose-500/10 text-rose-400",
 	aggregator: "border-emerald-500/50 bg-emerald-500/10 text-emerald-400",
 	graph: "border-blue-500/50 bg-blue-500/10 text-blue-400",
+	navigation: "border-cyan-500/50 bg-cyan-500/10 text-cyan-400",
 	sync: "border-orange-500/50 bg-orange-500/10 text-orange-400",
 	persistence: "border-teal-500/50 bg-teal-500/10 text-teal-400",
 };
@@ -254,6 +257,7 @@ function LogToolbar({
 	filtered,
 	filter,
 	setEventFilter,
+	onClear,
 }: {
 	search: string;
 	onSearchChange: (v: string) => void;
@@ -263,6 +267,7 @@ function LogToolbar({
 	filtered: DevEntry[];
 	filter: DevFilter | null;
 	setEventFilter: (events: Partial<Record<string, boolean>>) => void;
+	onClear: () => void;
 }) {
 	const [copyFeedback, setCopyFeedback] = useState(false);
 
@@ -341,6 +346,17 @@ function LogToolbar({
 
 			{/* Copy options dropdown */}
 			<CopyDropdown filtered={filtered} />
+
+			{/* Clear */}
+			<Button
+				variant="ghost"
+				size="icon-xs"
+				onClick={onClear}
+				className="text-muted-foreground"
+				title="Clear all"
+			>
+				<Trash2 />
+			</Button>
 		</div>
 	);
 }
@@ -555,12 +571,11 @@ function CollapsedGroupRow({
 
 type Props = {
 	entries: DevEntry[];
-	onClear: () => void;
 	filter: DevFilter | null;
 	setEventFilter: (events: Partial<Record<string, boolean>>) => void;
 };
 
-export function LogStream({ entries, onClear, filter, setEventFilter }: Props) {
+export function LogStream({ entries, filter, setEventFilter }: Props) {
 	const [search, setSearch] = useState("");
 	const [activeChannels, setActiveChannels] = useState<Set<DevChannel>>(
 		() => new Set(ALL_CHANNELS),
@@ -569,11 +584,13 @@ export function LogStream({ entries, onClear, filter, setEventFilter }: Props) {
 		() => new Set(),
 	);
 	const [paused, setPaused] = useState(false);
+	const [clearedAt, setClearedAt] = useState(0);
 
 	// Snapshot entries when pausing
 	const pausedEntriesRef = useRef<DevEntry[]>([]);
 
-	const displayEntries = paused ? pausedEntriesRef.current : entries;
+	const baseEntries = paused ? pausedEntriesRef.current : entries;
+	const displayEntries = clearedAt > 0 ? baseEntries.filter((e) => e.timestamp > clearedAt) : baseEntries;
 
 	const togglePause = useCallback(() => {
 		setPaused((prev) => {
@@ -585,9 +602,9 @@ export function LogStream({ entries, onClear, filter, setEventFilter }: Props) {
 	}, [entries]);
 
 	const handleClear = useCallback(() => {
-		onClear();
+		setClearedAt(Date.now());
 		setExpandedIndices(new Set());
-	}, [onClear]);
+	}, []);
 
 	const toggleChannel = useCallback((ch: DevChannel) => {
 		setActiveChannels((prev) => {
@@ -669,6 +686,7 @@ export function LogStream({ entries, onClear, filter, setEventFilter }: Props) {
 					filtered={filtered}
 					filter={filter}
 					setEventFilter={setEventFilter}
+					onClear={handleClear}
 				/>
 				<ChannelFilters
 					activeChannels={activeChannels}
@@ -680,7 +698,7 @@ export function LogStream({ entries, onClear, filter, setEventFilter }: Props) {
 			<div ref={scrollRef} className="dev-scrollbar min-h-0 flex-1 overflow-y-auto">
 				{filtered.length === 0 ? (
 					<p className="py-8 text-center text-sm text-muted-foreground">
-						{entries.length === 0
+						{displayEntries.length === 0
 							? "Waiting for log entries…"
 							: "No entries match the current filters."}
 					</p>

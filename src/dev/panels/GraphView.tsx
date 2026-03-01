@@ -1,10 +1,10 @@
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { DevEntry } from "@/event/dev";
-import { Boxes, Eclipse, Expand, PanelRight, Scan, Settings2, Shrink, Waypoints } from "lucide-react";
+import { Boxes, Eclipse, Expand, PanelRight, Scan, Settings2, Shrink, Trash2, Waypoints } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-type Props = { entries: DevEntry[] };
+type Props = { entries: DevEntry[]; onClear?: () => void };
 
 type Node = {
 	id: string;
@@ -47,7 +47,7 @@ function fmtTime(ts: number): string {
 	});
 }
 
-export function GraphView({ entries }: Props) {
+export function GraphView({ entries, onClear }: Props) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const canvasWrapRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -92,6 +92,14 @@ export function GraphView({ entries }: Props) {
 
 	// --- data extraction ---
 	const processEntries = useCallback(() => {
+		// entries were cleared — reset graph state
+		if (entries.length < processedRef.current) {
+			nodesRef.current.clear();
+			edgesRef.current.clear();
+			urlsRef.current.clear();
+			processedRef.current = 0;
+		}
+
 		const nodes = nodesRef.current;
 		const edges = edgesRef.current;
 		let added = false;
@@ -848,6 +856,16 @@ export function GraphView({ entries }: Props) {
 					</TabsList>
 				</Tabs>
 				<div className="absolute right-2 top-2 flex gap-1">
+					{onClear && (
+						<Button
+							variant="outline"
+							size="icon-xs"
+							onClick={onClear}
+							title="Clear all"
+						>
+							<Trash2 />
+						</Button>
+					)}
 					<Button
 						variant={physicsOpen ? "default" : "outline"}
 						size="icon-xs"

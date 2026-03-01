@@ -41,6 +41,10 @@ export function createBundler(graph: ReturnType<typeof createGraph>) {
     function commitPending(): void {
         if (dwellTimer) { clearTimeout(dwellTimer); dwellTimer = null; }
         if (pendingEdge) {
+            dev.log("navigation", "dwell.auto_commit", `dwell timer fired — committing ${pendingEdge.from} → ${pendingEdge.to}`, {
+                from: pendingEdge.from,
+                to: pendingEdge.to,
+            });
             graph.recordEdge(pendingEdge.from, pendingEdge.to);
             pendingEdge = null;
         }
@@ -51,13 +55,31 @@ export function createBundler(graph: ReturnType<typeof createGraph>) {
         if (dwellTimer) { clearTimeout(dwellTimer); dwellTimer = null; }
         const now = Date.now();
 
+        dev.log("navigation", "transition.start", `${graphCursor ?? "∅"} → ${to}`, {
+            from: graphCursor,
+            to,
+            hasPending: !!pendingEdge,
+            pendingFrom: pendingEdge?.from,
+            pendingTo: pendingEdge?.to,
+        });
+
         if (pendingEdge) {
             const elapsed = now - pendingEdge.arrivedAt;
             if (elapsed >= DWELL_MS) {
                 // Destination was held long enough — commit
+                dev.log("navigation", "dwell.met", `${pendingEdge.from} → ${pendingEdge.to} held ${elapsed}ms (≥${DWELL_MS}ms) — committing edge`, {
+                    from: pendingEdge.from,
+                    to: pendingEdge.to,
+                    elapsed,
+                    threshold: DWELL_MS,
+                });
                 graph.recordEdge(pendingEdge.from, pendingEdge.to);
                 if (pendingEdge.to !== to) {
                     pendingEdge = { from: pendingEdge.to, to, arrivedAt: now };
+                    dev.log("navigation", "pending.new", `new pending edge: ${pendingEdge.from} → ${to}`, {
+                        from: pendingEdge.from,
+                        to,
+                    });
                 } else {
                     pendingEdge = null;
                 }
@@ -65,9 +87,23 @@ export function createBundler(graph: ReturnType<typeof createGraph>) {
                 // Too brief — collapse the intermediate node
                 // A → X(brief) → B  becomes  A → B
                 if (pendingEdge.from !== to) {
+                    dev.log("navigation", "dwell.collapse", `${pendingEdge.to} held only ${elapsed}ms (<${DWELL_MS}ms) — collapsing: ${pendingEdge.from} → ${pendingEdge.to} → ${to} becomes ${pendingEdge.from} → ${to}`, {
+                        collapsed: pendingEdge.to,
+                        from: pendingEdge.from,
+                        to,
+                        elapsed,
+                        threshold: DWELL_MS,
+                    });
                     pendingEdge = { from: pendingEdge.from, to, arrivedAt: now };
                 } else {
                     // Returned to origin — cancel entirely
+                    dev.log("navigation", "dwell.cancel", `${pendingEdge.to} held only ${elapsed}ms — returned to origin ${to}, cancelling edge`, {
+                        from: pendingEdge.from,
+                        intermediate: pendingEdge.to,
+                        returnedTo: to,
+                        elapsed,
+                        threshold: DWELL_MS,
+                    });
                     pendingEdge = null;
                 }
             }
@@ -75,12 +111,21 @@ export function createBundler(graph: ReturnType<typeof createGraph>) {
             const from = graphCursor;
             if (from && from !== to) {
                 pendingEdge = { from, to, arrivedAt: now };
+                dev.log("navigation", "pending.new", `first pending edge: ${from} → ${to}`, {
+                    from,
+                    to,
+                });
             }
         }
 
         // Auto-commit after dwell threshold if user stays
         if (pendingEdge) {
             dwellTimer = setTimeout(commitPending, DWELL_MS);
+            dev.log("navigation", "dwell.timer_start", `auto-commit timer set for ${DWELL_MS}ms on ${pendingEdge.from} → ${pendingEdge.to}`, {
+                from: pendingEdge.from,
+                to: pendingEdge.to,
+                ms: DWELL_MS,
+            });
         }
 
         dev.log("aggregator", "transition", `${graphCursor ?? "∅"} → ${to}`, { from: graphCursor, to });

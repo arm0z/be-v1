@@ -29,7 +29,6 @@ const EVENT_GROUPS: { label: string; events: string[] }[] = [
 		events: [
 			"attention.active",
 			"attention.visible",
-			"attention.mouse_presence",
 			"attention.idle",
 		],
 	},
@@ -80,11 +79,33 @@ const EVENT_GROUPS: { label: string; events: string[] }[] = [
 	},
 	{
 		label: "AGGREGATOR",
-		events: ["bundle.opened", "bundle.sealed", "transition"],
+		events: ["bundle.opened", "bundle.sealed", "transition", "state.snapshot"],
 	},
 	{
 		label: "GRAPH",
-		events: ["edge.created", "edge.incremented"],
+		events: ["edge.created", "edge.incremented", "url.updated"],
+	},
+	{
+		label: "GRAPH NAVIGATION",
+		events: [
+			"chrome.tab_activated",
+			"chrome.window_focus",
+			"tab.resolved",
+			"tab.spurious",
+			"tab.override_settle",
+			"window.resolved",
+			"window.no_tab",
+			"off_browser.start",
+			"off_browser.cancel",
+			"off_browser.commit",
+			"transition.start",
+			"pending.new",
+			"dwell.met",
+			"dwell.collapse",
+			"dwell.cancel",
+			"dwell.timer_start",
+			"dwell.auto_commit",
+		],
 	},
 ];
 

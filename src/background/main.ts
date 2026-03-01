@@ -172,6 +172,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 // ── Layer 3: Attention ──────────────────────────────────────
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
+    dev.log("navigation", "chrome.tab_activated", `tab ${activeInfo.tabId} activated in window ${activeInfo.windowId}`, {
+        tabId: String(activeInfo.tabId),
+        windowId: activeInfo.windowId,
+    });
     aggregator.onTabActivated(String(activeInfo.tabId), activeInfo.windowId);
     chrome.tabs.get(activeInfo.tabId, (tab) => {
         dev.log("tap", "attention.active", "tab activated", {
@@ -191,6 +195,14 @@ let lastFocusedWindowId: number | null = null;
 chrome.windows.onFocusChanged.addListener((windowId) => {
     const prevWindowId = lastFocusedWindowId;
     lastFocusedWindowId = windowId === chrome.windows.WINDOW_ID_NONE ? null : windowId;
+
+    dev.log("navigation", "chrome.window_focus", windowId === chrome.windows.WINDOW_ID_NONE
+        ? `browser lost focus (prev window ${prevWindowId})`
+        : `window ${windowId} focused (prev ${prevWindowId})`, {
+        windowId,
+        prevWindowId,
+        lostFocus: windowId === chrome.windows.WINDOW_ID_NONE,
+    });
 
     aggregator.onWindowFocusChanged(windowId);
 
@@ -299,6 +311,7 @@ if (import.meta.env.DEV) {
             relay: true,
             aggregator: true,
             graph: true,
+            navigation: true,
             sync: true,
             persistence: true,
         },

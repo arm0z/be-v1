@@ -136,14 +136,17 @@ export function createAggregator(): Aggregator {
         if (offBrowserTimer !== null) {
             clearTimeout(offBrowserTimer);
             offBrowserTimer = null;
+            dev.log("navigation", "off_browser.cancel", "off-browser timer cancelled — user returned to Chrome");
         }
     }
 
     function startOffBrowserTimer(): void {
         cancelOffBrowser();
         bundler.seal();
+        dev.log("navigation", "off_browser.start", `off-browser timer started (${OFF_BROWSER_SETTLE_MS}ms settle)`);
         offBrowserTimer = setTimeout(() => {
             offBrowserTimer = null;
+            dev.log("navigation", "off_browser.commit", "off-browser timer fired — transitioning to off_browser");
             bundler.transition(OFF_BROWSER);
             emitState();
         }, OFF_BROWSER_SETTLE_MS);
@@ -154,48 +157,53 @@ export function createAggregator(): Aggregator {
         activeTabPerWindow.set(windowId, tabId);
 
         if (offBrowserTimer !== null) {
-            // During a genuine alt-tab away, Chrome sometimes fires a
-            // spurious onTabActivated for the *same* tab.  Keep the
-            // timer running so we still transition to off-browser.
-            //
-            // But if the tabId is *different*, the user clicked a new
-            // tab while the WINDOW_ID_NONE settle timer was pending
-            // (common on Linux / when DevTools is a separate window).
-            // Cancel the timer and process the switch normally — the
-            // user is still in Chrome.
-            if (prevTabId === tabId) return;
+            if (prevTabId === tabId) {
+                dev.log("navigation", "tab.spurious", `ignoring spurious activation for same tab ${tabId} during off-browser settle`, {
+                    tabId, windowId,
+                });
+                return;
+            }
+            dev.log("navigation", "tab.override_settle", `new tab ${tabId} activated during off-browser settle — cancelling timer`, {
+                tabId, prevTabId, windowId,
+            });
             cancelOffBrowser();
         }
 
         let source = tabSources.get(tabId);
+        const isNew = !source;
         if (!source) {
             source = `root@${tabId}`;
             tabSources.set(tabId, source);
         }
+        dev.log("navigation", "tab.resolved", `tab ${tabId} → source ${source}${isNew ? " (new)" : ""}`, {
+            tabId, windowId, source, prevTabId, isNew,
+        });
         bundler.transition(source);
         emitState();
     }
 
     function onWindowFocusChanged(windowId: number): void {
         if (windowId === chrome.windows.WINDOW_ID_NONE) {
-            // Seal immediately (stop accumulating), then defer the
-            // off-browser transition. If focus returns to a browser
-            // window within 200ms the timer is cancelled — no spurious
-            // off_browser node is created.
             startOffBrowserTimer();
         } else {
             cancelOffBrowser();
             const tabId = activeTabPerWindow.get(windowId);
             if (tabId) {
                 let source = tabSources.get(tabId);
+                const isNew = !source;
                 if (!source) {
                     source = `root@${tabId}`;
                     tabSources.set(tabId, source);
                 }
+                dev.log("navigation", "window.resolved", `window ${windowId} → tab ${tabId} → source ${source}${isNew ? " (new)" : ""}`, {
+                    windowId, tabId, source, isNew,
+                });
                 bundler.transition(source);
+            } else {
+                dev.log("navigation", "window.no_tab", `window ${windowId} has no active tab (DevTools / popup)`, {
+                    windowId,
+                });
             }
-            // No tabId means a no-tab window (DevTools, extension popup).
-            // User is still in Chrome — don't start off-browser timer.
         }
         emitState();
     }

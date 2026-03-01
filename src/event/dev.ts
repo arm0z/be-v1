@@ -5,6 +5,7 @@ export type DevChannel =
     | "relay"
     | "aggregator"
     | "graph"
+    | "navigation"
     | "sync"
     | "persistence";
 

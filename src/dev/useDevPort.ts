@@ -1,7 +1,7 @@
 import type { DevChannel, DevEntry } from "@/event/dev";
 import { useEffect, useRef, useState } from "react";
 
-type DevFilter = {
+export type DevFilter = {
     channels: Record<DevChannel, boolean>;
     events: Record<string, boolean>;
 };

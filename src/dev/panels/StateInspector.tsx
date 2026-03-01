@@ -3,6 +3,7 @@ import type { DevEntry } from "@/event/dev";
 import type { DevStateSnapshot } from "@/event/dev";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { DevCaptureSummary } from "@/event/dev";
+import { Button } from "@/components/ui/button";
 import {
 	Braces,
 	ChevronsDownUp,
@@ -11,6 +12,7 @@ import {
 	Code2,
 	Layers,
 	LayoutList,
+	Trash2,
 } from "lucide-react";
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -450,7 +452,7 @@ function FormattedState({ snapshot }: { snapshot: DevStateSnapshot }) {
 
 // ── Main Component ───────────────────────────────────────────────────
 
-export function StateInspector({ entries }: { entries: DevEntry[] }) {
+export function StateInspector({ entries, onClear }: { entries: DevEntry[]; onClear?: () => void }) {
 	const [view, setView] = useState("raw");
 	const [format, setFormat] = useState("formatted");
 
@@ -477,20 +479,33 @@ export function StateInspector({ entries }: { entries: DevEntry[] }) {
 						</TabsTrigger>
 					</TabsList>
 				</Tabs>
-				{view === "raw" && (
-					<Tabs value={format} onValueChange={setFormat}>
-						<TabsList className="h-auto border border-border bg-popover/80 p-0.5 backdrop-blur-sm">
-							<TabsTrigger value="formatted" className="h-auto px-2 py-0.5 text-xs">
-								<LayoutList className="size-3" />
-								Formatted
-							</TabsTrigger>
-							<TabsTrigger value="json" className="h-auto px-2 py-0.5 text-xs">
-								<Braces className="size-3" />
-								JSON
-							</TabsTrigger>
-						</TabsList>
-					</Tabs>
-				)}
+				<div className="flex items-center gap-2">
+					{view === "raw" && (
+						<Tabs value={format} onValueChange={setFormat}>
+							<TabsList className="h-auto border border-border bg-popover/80 p-0.5 backdrop-blur-sm">
+								<TabsTrigger value="formatted" className="h-auto px-2 py-0.5 text-xs">
+									<LayoutList className="size-3" />
+									Formatted
+								</TabsTrigger>
+								<TabsTrigger value="json" className="h-auto px-2 py-0.5 text-xs">
+									<Braces className="size-3" />
+									JSON
+								</TabsTrigger>
+							</TabsList>
+						</Tabs>
+					)}
+					{onClear && (
+						<Button
+							variant="ghost"
+							size="icon-xs"
+							onClick={onClear}
+							className="text-muted-foreground"
+							title="Clear all"
+						>
+							<Trash2 />
+						</Button>
+					)}
+				</div>
 			</div>
 			<div className="dev-scrollbar min-h-0 flex-1 overflow-auto p-4">
 				{!snapshot && (
