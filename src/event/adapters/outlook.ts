@@ -66,6 +66,21 @@ const READ_ATTACH = 'div[aria-label="Attachments"] button';
 const COMPOSE_ATTACH = '[data-testid="AttachmentCard"]';
 const COMPOSE_ATTACH_FALLBACK = 'div[aria-label^="Attachment"]';
 
+const NAV_SETTLE_MS = 300;
+
+// ── DOM-based context resolution ─────────────────────────────────────
+
+function resolveDomContext(folder: string): string | null {
+    const subjectEl = document.querySelector<HTMLElement>(READ_SUBJECT);
+    const subject = subjectEl?.innerText?.trim();
+    if (!subject) return null;
+    const fromEl = document.querySelector(READ_FROM);
+    const from = (fromEl?.getAttribute("aria-label") ?? "")
+        .replace(/^From:\s*/, "")
+        .trim();
+    return `${folder}:${shortHash(subject + from)}`;
+}
+
 function extractDraftId(): string | null {
     const el = document.querySelector<HTMLInputElement>(SUBJECT_INPUT);
     if (!el) return null;
@@ -199,14 +214,6 @@ function snapshotFingerprint(p: OutlookContentPayload): string {
     return shortHash(p.subject + p.to.join(",") + p.body.slice(0, 2000));
 }
 
-// ── context resolution ───────────────────────────────────────────────
-
-function resolveContext(pathname: string): string {
-    const { folder, messageId } = parseOutlookUrl(pathname);
-    if (!messageId) return folder;
-    return `${folder}:${shortHash(messageId)}`;
-}
-
 // ── adapter ──────────────────────────────────────────────────────────
 
 const POLL_MS = 300;
@@ -216,7 +223,20 @@ const POLL_MS = 300;
 export const outlookAdapter: Adapter = (inner) => {
     return (sink) => {
         let lastPath = window.location.pathname;
-        let currentCtx = resolveContext(lastPath);
+        const initRoute = parseOutlookUrl(lastPath);
+        let currentCtx = initRoute.messageId
+            ? resolveDomContext(initRoute.folder) ??
+              `${initRoute.folder}:${shortHash(initRoute.messageId)}`
+            : initRoute.folder;
+
+        let navSettleTimer: ReturnType<typeof setTimeout> | null = null;
+
+        function cancelSettle(): void {
+            if (navSettleTimer) {
+                clearTimeout(navSettleTimer);
+                navSettleTimer = null;
+            }
+        }
 
         // Layer 2: compose overlay state
         let overlayCtx: string | null = null;
@@ -280,14 +300,36 @@ export const outlookAdapter: Adapter = (inner) => {
             const path = window.location.pathname;
             if (path === lastPath) return false;
             lastPath = path;
-            const prevCtx = currentCtx;
-            currentCtx = resolveContext(path);
-            if (currentCtx !== prevCtx) {
-                emitNavigate(prevCtx, currentCtx);
-                scheduleSnapshot();
-                return true;
+
+            const { folder, messageId } = parseOutlookUrl(path);
+
+            // Folder-only navigation (list view): resolve immediately, no DOM to hash.
+            if (!messageId) {
+                cancelSettle();
+                const prevCtx = currentCtx;
+                currentCtx = folder;
+                if (currentCtx !== prevCtx) {
+                    emitNavigate(prevCtx, currentCtx);
+                    scheduleSnapshot();
+                    return true;
+                }
+                return false;
             }
-            return false;
+
+            // Message navigation: defer until DOM settles with new email content.
+            cancelSettle();
+            const urlFallback = `${folder}:${shortHash(messageId)}`;
+            navSettleTimer = setTimeout(() => {
+                navSettleTimer = null;
+                const prevCtx = currentCtx;
+                currentCtx = resolveDomContext(folder) ?? urlFallback;
+                if (currentCtx !== prevCtx) {
+                    emitNavigate(prevCtx, currentCtx);
+                    scheduleSnapshot();
+                }
+            }, NAV_SETTLE_MS);
+
+            return false; // No context change yet — settling
         }
 
         // Layer 2: MutationObserver for compose pane
@@ -382,6 +424,7 @@ export const outlookAdapter: Adapter = (inner) => {
             clearInterval(pollTimer);
             ac.abort();
             composeObserver.disconnect();
+            cancelSettle();
             if (settleTimer) clearTimeout(settleTimer);
             if (snapshotTimer) clearTimeout(snapshotTimer);
             teardownInner();

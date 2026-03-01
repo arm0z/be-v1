@@ -1487,6 +1487,14 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                                     onClick={() => {
                                         onSend?.({ type: "state.reset" });
                                         onClear();
+                                        nodesRef.current.clear();
+                                        edgesRef.current.clear();
+                                        processedRef.current = 0;
+                                        const canvas = canvasRef.current;
+                                        if (canvas) {
+                                            const ctx = canvas.getContext("2d");
+                                            ctx?.clearRect(0, 0, canvas.width, canvas.height);
+                                        }
                                     }}
                                 >
                                     <Trash2 />

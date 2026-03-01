@@ -12,7 +12,7 @@ tap() → outlookAdapter() → normalizer() → relay()
 
 | Feature                            | Status   | Notes                                                                                |
 | ---------------------------------- | -------- | ------------------------------------------------------------------------------------ |
-| URL-based context rewriting        | **Done** | `parseOutlookUrl()` + `shortHash()` + `resolveContext()`                             |
+| DOM-based context rewriting        | **Done** | `resolveDomContext()` hashes subject+from; 300ms settle; URL fallback                |
 | `outlook.navigate` event           | **Done** | Emitted on URL change via poll + popstate + reactive check                           |
 | Internal SPA navigation tracking   | **Done** | 300ms poll + popstate + reactive on each capture                                     |
 | Unsupported path fallback          | **Done** | Unsupported paths (deleted/junk/archive/search/bare) fall back to `other` context    |
@@ -26,11 +26,11 @@ tap() → outlookAdapter() → normalizer() → relay()
 
 The adapter produces six primary context types. All other Outlook paths fall back to `other` — captures still flow (time is tracked, transitions are visible) but no content snapshots or outlook-specific events are emitted.
 
-| Context                    | Source                                                     | Layer                 |
-| -------------------------- | ---------------------------------------------------------- | --------------------- |
-| `inbox` / `inbox:<hash>`   | URL — `/mail/inbox/` or `/mail/inbox/id/{id}`              | Layer 1 (implemented) |
-| `sent` / `sent:<hash>`     | URL — `/mail/sentitems/` or `/mail/sentitems/id/{id}`      | Layer 1 (implemented) |
-| `drafts` / `drafts:<hash>` | URL — `/mail/drafts/` or `/mail/drafts/id/{id}`            | Layer 1 (implemented) |
+| Context                    | Source                                                              | Layer                 |
+| -------------------------- | ------------------------------------------------------------------- | --------------------- |
+| `inbox` / `inbox:<hash>`   | List: URL. Read: DOM `subject+from` hash (URL fallback)             | Layer 1 (implemented) |
+| `sent` / `sent:<hash>`     | List: URL. Read: DOM `subject+from` hash (URL fallback)             | Layer 1 (implemented) |
+| `drafts` / `drafts:<hash>` | List: URL. Read: DOM `subject+from` hash (URL fallback)             | Layer 1 (implemented) |
 | `compose:<draft_hash>`     | DOM — compose pane open, subject has no `Re:`/`Fw:` prefix | Layer 2 (implemented) |
 | `reply:<draft_hash>`       | DOM — compose pane open, subject starts with `Re:`         | Layer 2 (implemented) |
 | `forward:<draft_hash>`     | DOM — compose pane open, subject starts with `Fw:`         | Layer 2 (implemented) |
@@ -74,7 +74,15 @@ Each distinct context creates a distinct source. Navigating between emails or en
 
 ---
 
-## Layer 1: URL-based context (implemented)
+## Layer 1: URL + DOM-based context (implemented)
+
+### DOM-based read-mode hashing
+
+When an email is opened (URL contains a message ID), the adapter hashes `subject + from` from the DOM reading pane via `resolveDomContext()` instead of the URL message ID. This produces **stable** context hashes — Outlook's URL IDs change on every visit to the same email, but subject+from do not.
+
+**Deferred resolution (300ms settle window):** The URL changes immediately via pushState, but the DOM reading pane takes ~100-200ms to render the new email. Reading the DOM right after URL change yields the OLD email's subject. The adapter defers context resolution by 300ms (`NAV_SETTLE_MS`) to let the DOM settle. During the settle window, captures continue flowing with the **previous** context (correct — the click that triggered navigation belongs to the old email). If the DOM is not ready after 300ms, falls back to URL hash (no regression). If another URL change arrives during settle, the old timer is cancelled.
+
+Folder-only navigation (list views without a message ID) resolves immediately with no settle delay.
 
 ### Supported URL patterns
 
@@ -114,9 +122,11 @@ interface OutlookRoute {
 // Falls back to { folder: "other", messageId: null } for unsupported paths
 // COMPOSE_RE handles /mail/compose/{id} (drafts opened in full-page compose)
 function parseOutlookUrl(pathname: string): OutlookRoute { ... }
-function shortHash(id: string): string { ... }  // FNV-1a → base36
-function resolveContext(pathname: string): string { ... }  // folder, folder:hash, or "other"
+function shortHash(id: string): string { ... }       // FNV-1a → base36
+function resolveDomContext(folder: string): string | null { ... }  // hash subject+from from DOM
 ```
+
+`resolveDomContext()` reads `subject` and `from` from the DOM reading pane and returns `folder:hash(subject+from)`, or `null` if the DOM isn't ready. `checkNavigation()` inlines the URL fallback (`folder:hash(messageId)`) for when the DOM is unavailable.
 
 When a URL segment is not in `FOLDER_MAP`, `parseOutlookUrl()` falls back to `folder: "other"`. Captures still flow through with `context: "other"`, ensuring time tracking and source transitions are preserved.
 
@@ -148,22 +158,24 @@ Properties:
 
 ```text
 <folder>            — list view (no specific email)
-<folder>:<hash>     — specific email within a folder
+<folder>:<hash>     — specific email within a folder (hash from DOM subject+from, URL fallback)
 ```
 
 Full source (after aggregator stamps): `<folder>:<hash>@<tabId>`
 
+In read mode, `<hash>` is derived from `subject + from` via the DOM (stable across visits). Falls back to URL message ID hash if DOM is unavailable.
+
 Examples:
 
-| URL                            | Context           | Source (tab 142)      |
-| ------------------------------ | ----------------- | --------------------- |
-| `/mail/inbox/`                 | `inbox`           | `inbox@142`           |
-| `/mail/inbox/id/AAk...VAAA`    | `inbox:k7f2m9x`   | `inbox:k7f2m9x@142`   |
-| `/mail/sentitems/id/BBx...QAA` | `sent:p4n9t3r`    | `sent:p4n9t3r@142`    |
-| `/mail/drafts/`                | `drafts`          | `drafts@142`          |
-| `/mail/compose/AAk...rAAA`     | `compose:m3p8q2w` | `compose:m3p8q2w@142` |
-| `/mail/deeplink/compose`       | `compose`         | `compose@142`         |
-| `/mail/deleteditems/id/...`    | `other`           | `other@142`           |
+| URL                            | Context           | Hash source            | Source (tab 142)      |
+| ------------------------------ | ----------------- | ---------------------- | --------------------- |
+| `/mail/inbox/`                 | `inbox`           | —                      | `inbox@142`           |
+| `/mail/inbox/id/AAk...VAAA`    | `inbox:k7f2m9x`   | DOM subject+from       | `inbox:k7f2m9x@142`   |
+| `/mail/sentitems/id/BBx...QAA` | `sent:p4n9t3r`    | DOM subject+from       | `sent:p4n9t3r@142`    |
+| `/mail/drafts/`                | `drafts`          | —                      | `drafts@142`          |
+| `/mail/compose/AAk...rAAA`     | `compose:m3p8q2w` | URL message ID         | `compose:m3p8q2w@142` |
+| `/mail/deeplink/compose`       | `compose`         | —                      | `compose@142`         |
+| `/mail/deleteditems/id/...`    | `other`           | —                      | `other@142`           |
 
 ### Internal navigation tracking (implemented)
 
@@ -652,6 +664,7 @@ return () => {
     clearInterval(pollTimer);          // URL poll interval
     ac.abort();                        // popstate + click listeners
     composeObserver.disconnect();      // MutationObserver for compose pane
+    cancelSettle();                    // navigation settle timer
     if (settleTimer) clearTimeout(settleTimer); // compose detection debounce
     if (snapshotTimer) clearTimeout(snapshotTimer); // content snapshot countdown
     teardownInner();                   // inner tap cleanup
