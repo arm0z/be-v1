@@ -1,6 +1,7 @@
 import type { Route } from "./types.ts";
 import { fileAdapter } from "./adapters/file.ts";
-import { htmlAdapter } from "./adapters/html.ts";
+// TODO: use case for htmlAdapter
+// import { htmlAdapter } from "./adapters/html.ts";
 import { normalizer } from "./normalizer.ts";
 import { outlookAdapter } from "./adapters/outlook.ts";
 import { relay } from "./relay.ts";
@@ -21,7 +22,6 @@ export const registry: Route[] = [
     {
         // catch-all: generic web
         match: () => true,
-        // TODO: remove htmlAdapter and add other whitelisted
-        build: () => relay(normalizer(htmlAdapter(tap()))),
+        build: () => relay(normalizer(tap())),
     },
 ];

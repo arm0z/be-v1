@@ -329,6 +329,17 @@ function chunkHubs(
     return { transitions: result, chunkMap };
 }
 
+/** Stage 0 only — collapse short-dwell midpoints without the full pipeline. */
+export function collapseShortDwellsOnly(
+    transitions: Transition[],
+    collapseDwellMs?: number,
+): Transition[] {
+    return collapseShortDwells(
+        [...transitions],
+        resolveOptions({ collapseDwellMs }),
+    );
+}
+
 // ── Pipeline ───────────────────────────────────────────────
 
 export function preprocess(

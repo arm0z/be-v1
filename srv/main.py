@@ -1,5 +1,5 @@
 """
-Browser extension packet viewer — receives Packet payloads from packer.ts.
+Browser extension packet viewer — receives packet payloads from packer.ts.
 
 Usage:
     uv run main.py
@@ -147,7 +147,7 @@ def capture_type_counts(captures: list) -> dict[str, int]:
 
 @app.route("/api/v1/extension/sync", methods=["POST"])
 def record() -> tuple:
-    """Receive a Packet from packer.ts."""
+    """Receive a packet from packer.ts."""
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "invalid JSON"}), 400
@@ -248,7 +248,7 @@ def index() -> tuple:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {TW_HEAD}
-<title>Packets :: Sink</title>
+<title>packets :: Sink</title>
 <style type="text/tailwindcss">
 @layer base {{
   a {{ @apply text-hg-blue hover:underline; }}
@@ -266,7 +266,7 @@ def index() -> tuple:
 </div>
 <table class="w-full border-collapse">
 <tr>
-  <th class="hidden sm:table-cell">Received</th><th>Packet</th><th>Groups</th><th>Bundles</th><th>Edges</th><th class="hidden md:table-cell">Created</th><th>Span</th>
+  <th class="hidden sm:table-cell">Received</th><th>packet</th><th>Groups</th><th>Bundles</th><th>Edges</th><th class="hidden md:table-cell">Created</th><th>Span</th>
 </tr>
 {table_rows if table_rows else '<tr><td colspan="7" class="text-hg-dim p-10 text-center">No packets yet.</td></tr>'}
 </table>
@@ -299,12 +299,13 @@ def packet_detail(row_id: str) -> tuple:
     )
     all_tabs = sorted({t for gr in groups for t in gr.get("meta", {}).get("tabs", [])})
 
-    # ── Packet header ───────────────────────────────────────────────
+    # ── packet header ───────────────────────────────────────────────
     meta_rows = f"""
         <tr><td>Row ID</td><td class="text-hg-muted break-all">{row_id}</td></tr>
-        <tr><td>Packet ID</td><td class="text-hg-muted break-all">{packet_id}</td></tr>
+        <tr><td>packet ID</td><td class="text-hg-muted break-all">{packet_id}</td></tr>
         <tr><td>Received</td><td>{received_at}</td></tr>
         <tr><td>Created At</td><td>{fmt_ts(created_at)}</td></tr>
+        <tr><td>Tokens</td><td class="text-hg-blue">~{sum(estimate_tokens(gr.get("text", "")) for gr in groups)}</td></tr>
         <tr><td>Groups</td><td>{len(groups)}</td></tr>
         <tr><td>Bundles</td><td>{bundle_count}</td></tr>
         <tr><td>Edges</td><td>{len(edges)}</td></tr>
@@ -447,7 +448,7 @@ def packet_detail(row_id: str) -> tuple:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {TW_HEAD}
-<title>{packet_id[:8]} :: Packet</title>
+<title>{packet_id[:8]} :: packet</title>
 <style type="text/tailwindcss">
 @layer base {{
   a {{ @apply text-hg-blue hover:underline; }}

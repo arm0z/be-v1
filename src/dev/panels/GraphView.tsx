@@ -39,7 +39,10 @@ import { EdgeTable } from "./EdgeTable";
 import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import { formatDwell, formatTime } from "../lib/format";
-import { preprocess } from "@/aggregation/preprocess";
+import {
+    collapseShortDwellsOnly,
+    preprocess,
+} from "@/aggregation/preprocess";
 
 type Props = {
     entries: DevEntry[];
@@ -303,7 +306,9 @@ export function GraphView({ entries, onClear, onSend }: Props) {
         processedRef.current = entries.length;
         if (!latestSnapshot) return;
 
-        const transitions = latestSnapshot.transitions ?? [];
+        const transitions = collapseShortDwellsOnly(
+            latestSnapshot.transitions ?? [],
+        );
 
         // Aggregate transitions into edges and collect node IDs
         const newEdges = new Map<string, Edge>();

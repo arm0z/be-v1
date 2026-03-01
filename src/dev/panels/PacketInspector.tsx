@@ -28,6 +28,11 @@ import { Row } from "../components/Row";
 import { formatDuration, formatTime } from "../lib/format";
 import { useCopyFeedback } from "../hooks/useCopyFeedback";
 
+function estimateTokens(text: string | undefined): number {
+    if (!text) return 0;
+    return Math.max(1, Math.floor(text.length / 4));
+}
+
 function groupToMarkdown(g: Group, i: number): string {
     const lines = [`## Group #${i} — ${g.meta.sources.join(", ")}`];
     lines.push(
@@ -107,6 +112,9 @@ function GroupCard({
                 </span>
                 <span className="ml-auto flex items-center gap-1 text-muted-foreground">
                     {group.bundles.length} bundles
+                    <span className="text-blue-400">
+                        ~{estimateTokens(group.text)} tokens
+                    </span>
                     <CopyGroupButton group={group} index={index} />
                     <Tooltip>
                         <TooltipTrigger asChild>
@@ -203,6 +211,11 @@ function FormattedPacket({ packet }: { packet: Packet }) {
         [packet.groups],
     );
 
+    const totalTokens = useMemo(
+        () => packet.groups.reduce((sum, g) => sum + estimateTokens(g.text), 0),
+        [packet.groups],
+    );
+
     return (
         <div className="space-y-5">
             {/* Packet header */}
@@ -213,6 +226,10 @@ function FormattedPacket({ packet }: { packet: Packet }) {
                     <Row label="Groups" value={String(packet.groups.length)} />
                     <Row label="Edges" value={String(packet.edges.length)} />
                     <Row label="Total Idle" value={formatDuration(totalIdleMs)} />
+                    <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Total Tokens</span>
+                        <span className="font-mono text-blue-400">~{totalTokens}</span>
+                    </div>
                 </div>
             </div>
 

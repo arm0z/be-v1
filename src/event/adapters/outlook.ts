@@ -210,10 +210,6 @@ function extractSnapshot(): OutlookContentPayload | null {
     return extractComposeSnapshot() ?? extractReadSnapshot();
 }
 
-function snapshotFingerprint(p: OutlookContentPayload): string {
-    return shortHash(p.subject + p.to.join(",") + p.body.slice(0, 2000));
-}
-
 // ── adapter ──────────────────────────────────────────────────────────
 
 const POLL_MS = 300;
@@ -250,19 +246,19 @@ export const outlookAdapter: Adapter = (inner) => {
         }
 
         // Layer 3: content snapshots
-        const seenContentHashes = new Set<string>();
+        const snapshotCtxSeen = new Set<string>();
         let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
 
         function maybeSnapshot() {
+            const ctx = effectiveCtx();
+            if (snapshotCtxSeen.has(ctx)) return;
             const payload = extractSnapshot();
             if (!payload) return;
-            const fp = snapshotFingerprint(payload);
-            if (seenContentHashes.has(fp)) return;
-            seenContentHashes.add(fp);
+            snapshotCtxSeen.add(ctx);
             const cap: Capture = {
                 type: "outlook.content",
                 timestamp: Date.now(),
-                context: effectiveCtx(),
+                context: ctx,
                 payload,
             };
             dev.log("adapter", "outlook.content", `mode=${payload.mode}`, cap);
@@ -271,10 +267,11 @@ export const outlookAdapter: Adapter = (inner) => {
 
         function scheduleSnapshot() {
             if (snapshotTimer) clearTimeout(snapshotTimer);
+            if (snapshotCtxSeen.has(effectiveCtx())) return;
             snapshotTimer = setTimeout(() => {
                 snapshotTimer = null;
                 maybeSnapshot();
-            }, 30_000);
+            }, 10_000);
         }
 
         function emitNavigate(prevCtx: string, newCtx: string) {
