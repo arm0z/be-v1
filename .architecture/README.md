@@ -101,19 +101,19 @@ Shared target types: `KeystrokeTarget`, `ClickTarget`, `FormTarget`, `Bounds`, `
 
 Events by layer:
 
-| Layer         | Event types                                                                                                      | Source                                                          |
-| ------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| 1. Session    | `window.created`, `window.closed`, `window.resized`, `tab.created`, `tab.closed`, `tab.moved`, `tab.transferred` | Service worker (`chrome.windows.*`, `chrome.tabs.*`)            |
-| 2. Navigation | `nav.completed`, `nav.spa`, `nav.title_changed`                                                                  | Service worker (`chrome.webNavigation.*`)                       |
+| Layer         | Event types                                                                                                      | Source                                                                                           |
+| ------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| 1. Session    | `window.created`, `window.closed`, `window.resized`, `tab.created`, `tab.closed`, `tab.moved`, `tab.transferred` | Service worker (`chrome.windows.*`, `chrome.tabs.*`)                                             |
+| 2. Navigation | `nav.completed`, `nav.spa`, `nav.title_changed`                                                                  | Service worker (`chrome.webNavigation.*`)                                                        |
 | 3. Attention  | `attention.active`, `attention.visible`, `attention.mouse_presence`, `attention.idle`                            | Service worker + content script (`chrome.tabs.onActivated`, `chrome.idle.*`, `visibilitychange`) |
-| 4. Keystrokes | `input.keystroke` (raw), `input.keystroke_batch` (normalized), `input.composition` (raw, consumed by normalizer) | Content script (`keydown`, `composition*`)                      |
-| 5. Mouse      | `input.click`, `input.double_click`, `input.context_menu`                                                        | Content script (`click`, `auxclick`, `dblclick`, `contextmenu`) |
-| 6. Scroll     | `input.scroll`                                                                                                   | Content script (`scroll`)                                       |
-| 7. Clipboard  | `input.selection`, `input.copy`, `input.paste`                                                                   | Content script (`selectionchange`, `copy`, `paste`)             |
-| 8. Forms      | `input.form_focus`, `input.form_change`, `input.form_submit`                                                     | Content script (`focusin`, `change`, `submit`)                  |
-| 9. Media      | `media.audio`, `media.download`                                                                                  | Service worker (`chrome.tabs.onUpdated`, `chrome.downloads.*`)  |
-| 10. Adapters  | `html.content`                                                                                                   | HTML Adapter (navigation, scroll, mutation triggers)            |
-|               | `file.content`                                                                                                   | File Adapter (file:// pages, categorized by extension)          |
+| 4. Keystrokes | `input.keystroke` (raw), `input.keystroke_batch` (normalized), `input.composition` (raw, consumed by normalizer) | Content script (`keydown`, `composition*`)                                                       |
+| 5. Mouse      | `input.click`, `input.double_click`, `input.context_menu`                                                        | Content script (`click`, `auxclick`, `dblclick`, `contextmenu`)                                  |
+| 6. Scroll     | `input.scroll`                                                                                                   | Content script (`scroll`)                                                                        |
+| 7. Clipboard  | `input.selection`, `input.copy`, `input.paste`                                                                   | Content script (`selectionchange`, `copy`, `paste`)                                              |
+| 8. Forms      | `input.form_focus`, `input.form_change`, `input.form_submit`                                                     | Content script (`focusin`, `change`, `submit`)                                                   |
+| 9. Media      | `media.audio`, `media.download`                                                                                  | Service worker (`chrome.tabs.onUpdated`, `chrome.downloads.*`)                                   |
+| 10. Adapters  | `html.content`                                                                                                   | HTML Adapter (navigation, scroll, mutation triggers)                                             |
+|               | `file.content`                                                                                                   | File Adapter (file:// pages, categorized by extension)                                           |
 
 #### Event routing
 
@@ -414,15 +414,15 @@ function observeSpaNavigation(onNavigate: (url: string) => void): void {
 
 ### Aggregation Glossary
 
-| Term               | What it is                                                                                                                                                                                                        |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **StampedCapture** | A Capture with `tabId` and `source` stamped on by the service worker. The content script doesn't know its tab ID — the service worker reads it from `sender.tab.id` and computes `source` as `context@tabId`.     |
-| **Bundle**         | A collection of StampedCaptures from a single source during a single continuous focus span. Opened when a source gains focus, sealed when focus shifts away. On seal, `translate()` renders captures into `text`. |
-| **Translate**      | A function `(bundles: Bundle[]) => string` that renders Bundles into a single human/LLM-readable text stream. Runs on seal. Each Bundle stores the result in its `text` field.                                    |
-| **Edge**           | A directed, weighted connection between two sources in the navigation graph. Weight increments each time the user transitions from one source to another.                                                         |
+| Term                | What it is                                                                                                                                                                                                                                                                                |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **StampedCapture**  | A Capture with `tabId` and `source` stamped on by the service worker. The content script doesn't know its tab ID — the service worker reads it from `sender.tab.id` and computes `source` as `context@tabId`.                                                                             |
+| **Bundle**          | A collection of StampedCaptures from a single source during a single continuous focus span. Opened when a source gains focus, sealed when focus shifts away. On seal, `translate()` renders captures into `text`.                                                                         |
+| **Translate**       | A function `(bundles: Bundle[]) => string` that renders Bundles into a single human/LLM-readable text stream. Runs on seal. Each Bundle stores the result in its `text` field.                                                                                                            |
+| **Edge**            | A directed, weighted connection between two sources in the navigation graph. Weight increments each time the user transitions from one source to another.                                                                                                                                 |
 | **`"off_browser"`** | The off-browser source. A regular node in the graph with `source: "off_browser"`. Has no Bundle (nothing to capture), but edges connect to and from it so the graph knows when the user left and returned. The transition to `off_browser` is deferred by 200 ms to absorb focus flicker. |
-| **Group**          | A cluster of related sources discovered by partitioning the navigation graph (community detection). Sources that the user frequently navigates between end up in the same Group.                                  |
-| **Packet**         | The delivery unit. Contains Groups, each with its associated Bundles, plus the navigation graph edges. Sent to the server on sync.                                                                                |
+| **Group**           | A cluster of related sources discovered by partitioning the navigation graph (community detection). Sources that the user frequently navigates between end up in the same Group.                                                                                                          |
+| **Packet**          | The delivery unit. Contains Groups, each with its associated Bundles, plus the navigation graph edges. Sent to the server on sync.                                                                                                                                                        |
 
 ### Aggregation Overview
 
