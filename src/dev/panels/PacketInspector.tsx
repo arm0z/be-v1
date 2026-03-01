@@ -78,6 +78,7 @@ function MetaRow({ meta }: { meta: GroupMeta }) {
                     meta.timeRange.end - meta.timeRange.start,
                 )}
             />
+            <Row label="Idle" value={formatDuration(meta.idleMs)} />
             <Row label="Sources" value={String(meta.sources.length)} />
             <Row label="Tabs" value={meta.tabs.join(", ")} />
         </div>
@@ -197,6 +198,11 @@ function FormattedPacket({ packet }: { packet: Packet }) {
         });
     }, []);
 
+    const totalIdleMs = useMemo(
+        () => packet.groups.reduce((sum, g) => sum + g.meta.idleMs, 0),
+        [packet.groups],
+    );
+
     return (
         <div className="space-y-5">
             {/* Packet header */}
@@ -206,6 +212,7 @@ function FormattedPacket({ packet }: { packet: Packet }) {
                     <Row label="Created" value={formatTime(packet.createdAt)} />
                     <Row label="Groups" value={String(packet.groups.length)} />
                     <Row label="Edges" value={String(packet.edges.length)} />
+                    <Row label="Total Idle" value={formatDuration(totalIdleMs)} />
                 </div>
             </div>
 

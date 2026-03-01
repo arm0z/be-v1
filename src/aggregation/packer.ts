@@ -233,6 +233,8 @@ function computeMeta(bundles: Bundle[]): GroupMeta {
         .map((b) => b.endedAt)
         .filter((e): e is number => e !== null);
 
+    const idleMs = bundles.reduce((sum, b) => sum + b.idleMs, 0);
+
     return {
         sources,
         tabs,
@@ -240,6 +242,7 @@ function computeMeta(bundles: Bundle[]): GroupMeta {
             start: Math.min(...starts),
             end: ends.length > 0 ? Math.max(...ends) : Math.max(...starts),
         },
+        idleMs,
     };
 }
 

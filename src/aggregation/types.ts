@@ -13,6 +13,7 @@ export type Bundle = {
     endedAt: number | null;
     captures: BundleEntry[];
     text: string | null;
+    idleMs: number;
 };
 
 export type Edge = {
@@ -65,6 +66,7 @@ export type GroupMeta = {
     sources: string[];
     tabs: string[];
     timeRange: { start: number; end: number };
+    idleMs: number;
 };
 
 export type Group = {

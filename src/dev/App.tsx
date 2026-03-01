@@ -9,6 +9,7 @@ import {
     ExternalLink,
     GitGraph,
     HardDrive,
+    ListRestart,
     Maximize2,
     Menu,
     Minimize2,
@@ -34,6 +35,7 @@ import { GraphView } from "./panels/GraphView";
 import { LogStream } from "./panels/LogStream";
 import { PacketInspector } from "./panels/PacketInspector";
 import { CheckpointInspector } from "./panels/CheckpointInspector";
+import { RetryQueueInspector } from "./panels/RetryQueueInspector";
 import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useDevPort } from "./useDevPort";
@@ -83,6 +85,15 @@ function CheckpointPanel(_props: IDockviewPanelProps) {
     );
 }
 
+function RetryQueuePanel(_props: IDockviewPanelProps) {
+    const { send } = useDevContext();
+    return (
+        <ErrorBoundary>
+            <RetryQueueInspector onSend={send} />
+        </ErrorBoundary>
+    );
+}
+
 /* ── tab icon renderer ────────────────────────────────────────── */
 
 const iconMap: Record<string, ReactElement> = {
@@ -90,6 +101,7 @@ const iconMap: Record<string, ReactElement> = {
     logs: <ScrollText className="mr-1.5 h-3.5 w-3.5" />,
     packet: <Package className="mr-1.5 h-3.5 w-3.5" />,
     checkpoint: <HardDrive className="mr-1.5 h-3.5 w-3.5" />,
+    retryQueue: <ListRestart className="mr-1.5 h-3.5 w-3.5" />,
 };
 
 function TabIcon({ api, params }: IDockviewPanelProps) {
@@ -120,6 +132,7 @@ const panelDefs = [
     { type: "logs", component: "logs", title: "Log" },
     { type: "packet", component: "packet", title: "Packet" },
     { type: "checkpoint", component: "checkpoint", title: "Checkpoint" },
+    { type: "retryQueue", component: "retryQueue", title: "Retry Queue" },
 ] as const;
 
 // Module-level counter for unique panel IDs. Under StrictMode double-mount,
@@ -217,6 +230,7 @@ const components = {
     logs: LogsPanel,
     packet: PacketPanel,
     checkpoint: CheckpointPanel,
+    retryQueue: RetryQueuePanel,
 };
 
 const tabComponents = {

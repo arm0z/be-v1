@@ -209,6 +209,24 @@ chrome.tabs.onAttached.addListener((tabId, attachInfo) => {
     });
 });
 
+// ── Idle Detection ──────────────────────────────────────────
+
+chrome.idle.setDetectionInterval(60);
+
+chrome.idle.onStateChanged.addListener((newState) => {
+    dev.log("tap", "idle.state_changed", `idle state → ${newState}`, {
+        state: newState,
+    });
+    aggregator.ingestSignal(
+        {
+            type: "idle.state_changed",
+            timestamp: Date.now(),
+            payload: { state: newState as "active" | "idle" | "locked" },
+        },
+        String(previousActiveTabId ?? "unknown"),
+    );
+});
+
 // ── Layer 2: Navigation ─────────────────────────────────────
 
 chrome.webNavigation.onCompleted.addListener((details) => {

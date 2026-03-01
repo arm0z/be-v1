@@ -255,6 +255,12 @@ export interface OutlookContentPayload {
     draftId: string | null;
 }
 
+// ── idle ─────────────────────────────────────────────────────────────
+
+export interface IdleStateChangedPayload {
+    state: "active" | "idle" | "locked";
+}
+
 // ── signals (service-worker-originated events) ─────────────────────
 
 interface BaseSignal<T extends string, P> {
@@ -271,6 +277,7 @@ export type Signal =
     | BaseSignal<"tab.created", TabCreatedPayload>
     | BaseSignal<"tab.closed", TabClosedPayload>
     | BaseSignal<"attention.visible", AttentionVisiblePayload>
+    | BaseSignal<"idle.state_changed", IdleStateChangedPayload>
     | BaseSignal<"media.audio", MediaAudioPayload>
     | BaseSignal<"media.download", MediaDownloadPayload>;
 

@@ -23,15 +23,46 @@ export function createBundler() {
             endedAt: null,
             captures: [],
             text: null,
+            idleMs: 0,
         };
         dev.log("aggregator", "bundle.opened", `bundle opened for ${source}`, {
             source,
         });
     }
 
+    function computeIdleMs(bundle: Bundle): number {
+        let total = 0;
+        let idleStart: number | null = null;
+
+        for (const entry of bundle.captures) {
+            if (entry.type === "idle.state_changed") {
+                const state = (
+                    entry.payload as { state: "active" | "idle" | "locked" }
+                ).state;
+                if (state === "idle" || state === "locked") {
+                    if (idleStart === null) idleStart = entry.timestamp;
+                } else {
+                    // "active"
+                    if (idleStart !== null) {
+                        total += entry.timestamp - idleStart;
+                        idleStart = null;
+                    }
+                }
+            }
+        }
+
+        // If still idle when the bundle ends, count to endedAt
+        if (idleStart !== null && bundle.endedAt !== null) {
+            total += bundle.endedAt - idleStart;
+        }
+
+        return total;
+    }
+
     function seal(): void {
         if (!openBundle) return;
         openBundle.endedAt = Date.now();
+        openBundle.idleMs = computeIdleMs(openBundle);
         openBundle.text = translate(openBundle);
         sealed.push(openBundle);
         dev.log(
