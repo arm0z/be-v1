@@ -75,7 +75,17 @@ takeSnapshot(trigger)
 
 ## DOM extractor (`extract/dom.ts`)
 
-Produces the `text` field — a Firecrawl-inspired markdown conversion using Turndown.js with GFM support.
+Produces the `text` field — a Firecrawl-inspired markdown conversion using Turndown.js with GFM support. The extractor accepts an optional `ExtractDOMOpts` object to control which stages run:
+
+```ts
+interface ExtractDOMOpts {
+    overlays?: boolean;        // extract overlay/dialog content (default: true)
+    viewportOnly?: boolean;    // prune to viewport-visible elements (default: true)
+    stripBoilerplate?: boolean; // remove nav/footer/ads/noise (default: true)
+}
+```
+
+The HTML adapter calls `extractDOM()` with no options (all defaults on).
 
 ### Extraction pipeline
 

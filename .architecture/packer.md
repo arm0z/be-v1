@@ -111,7 +111,7 @@ Both `drainSealed()` and `drainTransitions()` are destructive reads — they ret
 
 The Packet's `edges` field contains the aggregated `Edge[]` built from transitions during graph construction — this is for the server's benefit (compact representation of the navigation graph).
 
-### `partitionIntoGroups(transitions, bundles): Group[]`
+### `partitionIntoGroups(transitions, bundles): { groups, edges }`
 
 The full pipeline: pre-process the raw transition log, build a weighted directed graph, run directed Louvain, assign bundles to communities.
 
@@ -137,7 +137,7 @@ partitionIntoGroups(transitions, bundles)
   │     ├─ compute GroupMeta from those bundles
   │     └─ join bundle.text values → group.text
   │
-  └─ return Group[]
+  └─ return { groups: Group[], edges: Edge[] }
 ```
 
 Sources that appear in bundles but have no transitions (isolated sources — e.g. a tab the user opened but never switched away from before flush) become singleton groups.
@@ -446,8 +446,8 @@ Communities become super-nodes. Edges between communities are aggregated (weight
 #### Edge cases
 
 - 0 nodes: return empty map
-- 1–2 nodes with edges: all in one community
-- 1–2 nodes without edges: each in its own community
+- 1 node: always in its own community (returns before edge check)
+- 0 edges (any node count): each node in its own community
 - Disconnected subgraphs: Louvain naturally separates them (no cross-community edges to incentivize merging)
 
 #### Complexity
@@ -468,7 +468,7 @@ type LouvainResult = {
 Each sealed Bundle is assigned to a community via one of three paths:
 
 ```bash
-assignBundles(louvain, bundles, chunkMap, hubSources, excludedSources)
+assignBundles(louvain, bundles, preprocessResult)
   │
   for each bundle:
   │
@@ -507,7 +507,7 @@ A single hub source can contribute bundles to **multiple** Groups. The bundle's 
 | `MIN_CHUNK_MS`            | 1 minute   | Floor for chunk window (sub-minute splits add noise)                |
 | `MAX_CHUNK_MS`            | 15 minutes | Ceiling for chunk window (beyond this, context is too diluted)      |
 | `DEFAULT_RESOLUTION`      | 1.0        | Louvain resolution $\gamma$. <1 = larger communities, >1 = smaller  |
-| `MIN_IMPROVEMENT`         | 1e-6       | Minimum modularity gain to accept a move                            |
+| `MIN_IMPROVEMENT`         | 1e-6       | Minimum inter-pass modularity gain to continue coarsening           |
 | `MAX_PASSES`              | 10         | Maximum coarsening passes                                           |
 | `MAX_LOCAL_ITERATIONS`    | 100        | Maximum Phase 1 iterations per pass                                 |
 
@@ -665,18 +665,18 @@ computeMeta(bundles)
   ├─ sources = unique bundle.source values
   │     e.g. ["root@42", "root@17", "dashboard@42"]
   │
-  ├─ tabs = unique bundle.tabId values (extracted from source or bundle)
+  ├─ tabs = unique tab IDs (extracted from bundle.source by splitting at last "@")
   │     e.g. ["42", "17"]
   │
   └─ timeRange = {
        start: min(bundle.startedAt for all bundles),
-       end:   max(bundle.endedAt   for all bundles)
+       end:   max(bundle.endedAt for non-null values, fallback to max startedAt)
      }
 ```
 
 ### Group text assembly
 
-Each bundle already has `.text` populated by `translate()` at seal time. The group's `text` is simply the bundle texts joined in chronological order (sorted by `startedAt`), separated by newlines. No re-translation or additional formatting is needed at the group level.
+Each bundle already has `.text` populated by `translate()` at seal time. The group's `text` is the bundle texts (with `null` coerced to `""` and empty strings filtered out) joined in chronological order (sorted by `startedAt`), separated by newlines. No re-translation or additional formatting is needed at the group level.
 
 ## Flush triggers
 
@@ -688,6 +688,7 @@ The Packer doesn't decide when to flush — something upstream calls `flush()`. 
 | Off-browser idle | `chrome.alarms` (10m)      | 10 minutes after the user leaves the browser    |
 | Recovery         | Checkpoint recovery        | On service worker restart with stale checkpoint |
 | Shutdown         | `chrome.runtime.onSuspend` | Best-effort before service worker dies          |
+| DevHub           | `sync.flush` / `sync.send` | Manual trigger from the dev panel               |
 
 The trigger mechanism is outside the Packer's scope. All the Packer knows is: `flush()` was called, drain everything, build a Packet.
 
@@ -736,13 +737,16 @@ The Packer itself is stateless — it reads, transforms, and returns. There's no
 
 ## Dev logs
 
-The Packer uses the `"aggregator"` dev channel (same as the Bundler):
+The Packer uses the `"packer"` dev channel:
 
-| Event          | When                | Data                                                                   |
-| -------------- | ------------------- | ---------------------------------------------------------------------- |
-| `pack.flushed` | `flush()` completes | `{ groups: number, bundles: number, edges: number, packetId: string }` |
+| Event               | When                              | Data                                                                               |
+| ------------------- | --------------------------------- | ---------------------------------------------------------------------------------- |
+| `pack.preprocessed` | After preprocessing transitions   | `{ raw, filtered, sentinels, excluded: string[], hubs: string[], chunks: number }` |
+| `pack.graph`        | After building directed graph     | `{ nodes, edges, totalWeight }`                                                    |
+| `pack.louvain`      | After Louvain community detection | `{ communities, modularity, nodes }`                                               |
+| `pack.flushed`      | `flush()` completes               | `{ groups: number, bundles: number, edges: number, packetId: string }`             |
 
-These are visible in the DevHub panel under the `AGGREGATOR` event group.
+These are visible in the DevHub panel under the `PACKER` event group in [`src/dev/panels/FilterToggles.tsx`](../src/dev/panels/FilterToggles.tsx).
 
 ## Example scenario
 
@@ -784,9 +788,9 @@ flush():
      → Group B meta: { sources: ["root@5"], tabs: ["5"],
                         timeRange: { start: 10:34:05, end: 10:35:00 } }
 
-  6. translate:
-     → Group A text: combined narrative of all 3 bundles (PR review + issue)
-     → Group B text: narrative of Gmail bundle
+  6. join bundle.text values:
+     → Group A text: combined text of all 3 bundles (PR review + issue), pre-computed at seal time
+     → Group B text: text of Gmail bundle, pre-computed at seal time
 
   7. assemble:
      → Packet {
@@ -881,7 +885,9 @@ export type Packet = {
 export type Aggregator = {
     ingest(capture: Capture, tabId: string): void;
     ingestSignal(signal: Signal, tabId: string): void;
-    onVisibilityChanged(tabId: string, visible: boolean): void;
+
+    /** Set the currently active tab, or null for off-browser. */
+    setActiveTab(tabId: string | null, url?: string): void;
 
     getSealed(): Bundle[];
     drainSealed(): Bundle[];
@@ -893,6 +899,13 @@ export type Aggregator = {
 
     /** Seal the current open bundle (if any). Used by the packer before draining. */
     seal(): void;
+
+    /** Snapshot all in-memory state for checkpointing. */
+    snapshot(): Checkpoint;
+    /** Restore state from a checkpoint. */
+    restore(cp: Checkpoint): void;
+    /** Register a callback that fires after every bundle seal. */
+    onSeal(cb: () => void): void;
 };
 ```
 
@@ -912,14 +925,14 @@ export function createBundler() {
     function transition(to: string): void {
         const from = activeSource;
         seal();
-        if (from) {
+        if (from && from !== to) {
             const lastSealed = sealed[sealed.length - 1];
             const dwellMs = lastSealed
                 ? lastSealed.endedAt! - lastSealed.startedAt
                 : 0;
             transitions.push({ from, to, ts: Date.now(), dwellMs });
+            dev.log("aggregator", "edge.committed", `${from} → ${to}`, { from, to, dwellMs });
         }
-        dev.log("aggregator", "transition", `${from ?? "∅"} → ${to}`, { from, to });
         activeSource = to;
         if (to !== UNKNOWN && to !== OFF_BROWSER) {
             openNew(to);
@@ -944,11 +957,12 @@ export function createBundler() {
         seal, transition,
         getSealed, drainSealed,
         getTransitions, drainTransitions,
+        snapshot, restore, onSeal,
     };
 }
 ```
 
-**Key change:** `dwellMs` is computed from the sealed bundle's `endedAt - startedAt`. We capture `from` before calling `seal()`, then read the last sealed bundle after `seal()` completes. All dwell machinery (`graphCursor`, `pendingEdge`, `dwellTimer`, `DWELL_MS`, `commitPending()`, `moveCursor()`) is removed — transient filtering is handled by `preprocess.ts`.
+**Key change:** `dwellMs` is computed from the sealed bundle's `endedAt - startedAt`. We capture `from` before calling `seal()`, then read the last sealed bundle after `seal()` completes. Self-transitions (`from === to`) are skipped. All dwell machinery (`graphCursor`, `pendingEdge`, `dwellTimer`, `DWELL_MS`, `commitPending()`, `moveCursor()`) is removed — transient filtering is handled by `preprocess.ts`.
 
 ### `src/aggregation/index.ts` — aggregator facade
 
@@ -957,17 +971,20 @@ The aggregator facade adds `getTransitions`, `drainTransitions`, and `seal` to i
 ```typescript
 export function createAggregator(): Aggregator {
     const bundler = createBundler();
-    // ... existing ingest, ingestSignal, onVisibilityChanged ...
+    // ... existing ingest, ingestSignal, setActiveTab ...
 
     return {
         ingest,
         ingestSignal,
-        onVisibilityChanged,
+        setActiveTab,
         getSealed: bundler.getSealed,
         drainSealed: bundler.drainSealed,
         getTransitions: bundler.getTransitions,
         drainTransitions: bundler.drainTransitions,
         seal: bundler.seal,
+        snapshot: bundler.snapshot,
+        restore: bundler.restore,
+        onSeal: bundler.onSeal,
     };
 }
 ```
@@ -1265,7 +1282,7 @@ function flush(): Packet | null {
         createdAt: Date.now(),
     };
 
-    dev.log("aggregator", "pack.flushed", `packet ${packet.id}`, {
+    dev.log("packer", "pack.flushed", `packet ${packet.id}`, {
         groups: groups.length,
         bundles: bundles.length,
         edges: edges.length,
@@ -1294,4 +1311,4 @@ The DevHub graph view ([`src/dev/panels/GraphView.tsx`](../src/dev/panels/GraphV
 | ~~`src/aggregation/graph.ts`~~                                                  | **Deleted.** Replaced by the transition log in the bundler; edges are built by `buildDirectedGraph()` in `directed-louvain.ts` at flush time    |
 | [`src/aggregation/translate.ts`](../src/aggregation/translate.ts)               | `translate(bundle)` — called at seal time by the bundler; packer uses the pre-computed `bundle.text` directly                                   |
 | [`src/aggregation/types.ts`](../src/aggregation/types.ts)                       | `Bundle`, `Transition`, `Edge`, `Group`, `GroupMeta`, `Packet`, `DirectedGraph`, `LouvainResult`, `ChunkInfo`, `PreprocessResult`, `Aggregator` |
-| [`src/background/main.ts`](../src/background/main.ts)                           | Wires packer with `chrome.alarms` flush trigger (every 5 min) and manual `dev:flush` handler                                                    |
+| [`src/background/main.ts`](../src/background/main.ts)                           | Wires packer with `chrome.alarms` flush triggers (periodic every 2h, idle after 10m off-browser) and DevHub `sync.flush`/`sync.send` commands   |

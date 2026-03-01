@@ -1,19 +1,53 @@
+<!-- omit from toc -->
 # Chrome Extension: Active Tab Navigation Tracking
 
 This document explains how the Hourglass Chrome extension tracks which browser tab the user is currently looking at, including when they leave the browser entirely.
 
+<!-- omit from toc -->
 ## Table of Contents
 
 - [Overview](#overview)
 - [Architecture](#architecture)
+  - [Why two layers?](#why-two-layers)
 - [Required Permissions](#required-permissions)
-- [Layer 1: Content Script (HTTPS Pages)](#layer-1-content-script-https-pages)
+  - [`tabs` permission](#tabs-permission)
+  - [`windows` permission](#windows-permission)
+  - [`webNavigation` permission](#webnavigation-permission)
+  - [Content script match pattern](#content-script-match-pattern)
+- [Layer 1: Content Script (All Matched Pages)](#layer-1-content-script-all-matched-pages)
+  - [Detection mechanisms](#detection-mechanisms)
+    - [1. Page Visibility API (`visibilitychange`)](#1-page-visibility-api-visibilitychange)
+    - [2. Window focus/blur events](#2-window-focusblur-events)
+    - [3. `pageshow` / bfcache restoration](#3-pageshow--bfcache-restoration)
+    - [4. Initial state on load](#4-initial-state-on-load)
+  - [Deduplication](#deduplication)
+  - [Message format](#message-format)
 - [Layer 2: Chrome Tabs API (All Pages)](#layer-2-chrome-tabs-api-all-pages)
+  - [`chrome.tabs.onActivated`](#chrometabsonactivated)
+  - [`chrome.windows.onFocusChanged`](#chromewindowsonfocuschanged)
+  - [`updateActiveTabFromApi()`](#updateactivetabfromapi)
+  - [`chrome.tabs.onRemoved`](#chrometabsonremoved)
 - [Combined Behavior](#combined-behavior)
+  - [How the two layers interact](#how-the-two-layers-interact)
+  - [Event flow examples](#event-flow-examples)
+    - [Switching from `https://github.com` to `chrome://settings`](#switching-from-httpsgithubcom-to-chromesettings)
+    - [Switching from `chrome://settings` to `https://github.com`](#switching-from-chromesettings-to-httpsgithubcom)
+    - [User alt-tabs to VS Code](#user-alt-tabs-to-vs-code)
+    - [User returns to Chrome](#user-returns-to-chrome)
 - [State Management](#state-management)
+  - [The `tabStates` Map](#the-tabstates-map)
+  - [`getActiveTab()`](#getactivetab)
 - [Output Format](#output-format)
 - [Edge Cases and Limitations](#edge-cases-and-limitations)
+  - [Service worker lifecycle](#service-worker-lifecycle)
+  - [Multiple windows](#multiple-windows)
+  - [Race conditions between layers](#race-conditions-between-layers)
+  - [Tabs that content scripts cannot reach](#tabs-that-content-scripts-cannot-reach)
+  - [`tab.pendingUrl` fallback](#tabpendingurl-fallback)
 - [Full Source Code](#full-source-code)
+  - [`manifest.config.ts`](#manifestconfigts)
+  - [`src/background/main.ts`](#srcbackgroundmaints)
+  - [`src/event/visibility.ts` (visibility tracking)](#srceventvisibilityts-visibility-tracking)
 
 ---
 
@@ -33,29 +67,29 @@ This is implemented using two complementary detection layers because Chrome does
 ## Architecture
 
 ```text
-┌─────────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────────────────┐
 │                     Service Worker                       │
-│                 (src/background/service-worker.ts)        │
+│                 (src/background/main.ts)                 │
 │                                                          │
 │  ┌──────────────────────────────────────────────────┐    │
-│  │              tabStates: Map<number, TabState>     │    │
-│  │  Stores { url, title, visible } for every known   │    │
-│  │  tab. getActiveTab() returns the first visible    │    │
-│  │  entry, or null if none are visible.              │    │
+│  │              tabStates: Map<number, TabState>    │    │
+│  │  Stores { url, title, visible } for every known  │    │
+│  │  tab. getActiveTab() returns the first visible   │    │
+│  │  entry, or null if none are visible.             │    │
 │  └──────────────────────────────────────────────────┘    │
 │                          ▲                               │
 │              ┌───────────┼───────────┐                   │
 │              │                       │                   │
 │     Layer 1: Messages        Layer 2: Chrome APIs        │
-│     from content scripts     tabs.onActivated             │
-│     (PAGE_VISIBILITY_        windows.onFocusChanged       │
-│      CHANGED)                tabs.onRemoved               │
+│     from content scripts     tabs.onActivated            │
+│     (PAGE_VISIBILITY_        windows.onFocusChanged      │
+│      CHANGED)                tabs.onRemoved              │
 │              │                       │                   │
 └──────────────┼───────────────────────┼───────────────────┘
                │                       │
-    ┌──────────┴──────────┐   ┌────────┴────────┐
+    ┌──────────┴──────────┐   ┌────────┴─────────┐
     │   Content Script    │   │  Chrome Browser  │
-    │ (src/content/main.ts)│   │  Internal Events │
+    │(src/content/main.ts)│   │  Internal Events │
     │                     │   │                  │
     │ Runs on HTTPS pages │   │ Fires for ALL    │
     │ only. Detects OS-   │   │ tab switches     │
@@ -86,8 +120,10 @@ Content scripts provide **OS-level visibility detection** (Page Visibility API, 
 In `manifest.config.ts`:
 
 ```ts
-permissions: ["tabs", "windows"],
+permissions: ["alarms", "storage", "tabs", "webNavigation", "downloads", "windows"],
 ```
+
+The navigation-relevant permissions:
 
 ### `tabs` permission
 
@@ -100,28 +136,31 @@ permissions: ["tabs", "windows"],
 - Enables `chrome.windows.onFocusChanged` listener.
 - This event fires with `chrome.windows.WINDOW_ID_NONE` (-1) when **all** Chrome windows lose focus, which is how we detect the user leaving the browser.
 
+### `webNavigation` permission
+
+- Enables `chrome.webNavigation.onCompleted` listener for tracking page navigation events.
+
 ### Content script match pattern
 
 ```ts
 content_scripts: [
     {
         js: ["src/content/main.ts"],
-        matches: ["https://*/*"],
+        matches: ["<all_urls>"],
     },
 ],
 ```
 
-- `"https://*/*"` — injects the content script into every HTTPS page.
-- Chrome **forbids** content script injection into `chrome://`, `chrome-extension://`, `about:`, `data:`, and `file://` URLs. This is a hard browser security restriction with no workaround.
-- You can add `"http://*/*"` to also cover HTTP pages if needed.
+- `"<all_urls>"` — injects the content script into every page the browser allows (HTTP, HTTPS, file:// with user permission).
+- Chrome **forbids** content script injection into `chrome://`, `chrome-extension://`, `about:`, and `data:` URLs. This is a hard browser security restriction with no workaround.
 
 ---
 
-## Layer 1: Content Script (HTTPS Pages)
+## Layer 1: Content Script (All Matched Pages)
 
-**File:** `src/content/main.ts`
+**File:** `src/content/main.ts` (visibility logic in `src/event/visibility.ts`)
 
-The content script runs inside each HTTPS web page and uses browser APIs that are only available in a page context.
+The content script runs inside each matched web page and uses browser APIs that are only available in a page context. Visibility tracking is handled by `setupVisibility()` in `src/event/visibility.ts`.
 
 ### Detection mechanisms
 
@@ -160,7 +199,20 @@ These catch edge cases the Visibility API might miss, such as:
 - Focus moving to browser chrome (address bar, devtools) while the page is still "visible."
 - Some OS-specific focus transitions.
 
-#### 3. Initial state on load
+#### 3. `pageshow` / bfcache restoration
+
+```ts
+window.addEventListener("pageshow", (e) => {
+    if (e.persisted) {
+        lastState = null; // force re-send
+        sendVisibilityUpdate(document.visibilityState === "visible");
+    }
+});
+```
+
+When a page is restored from the browser's back/forward cache (bfcache), the content script doesn't re-run but the message channel is re-established. The `pageshow` handler with `e.persisted` forces a re-send of the current visibility state.
+
+#### 4. Initial state on load
 
 ```ts
 sendVisibilityUpdate(document.visibilityState === "visible");
@@ -188,11 +240,10 @@ Both the Visibility API and focus/blur events can fire for the same state change
 
 ```ts
 chrome.runtime.sendMessage({
-    type: "PAGE_VISIBILITY_CHANGED",
-    visible: isVisible,       // boolean
+    type: "page:visibility",
+    visible: isVisible,        // boolean
     url: window.location.href, // full URL of the page
     title: document.title,     // page title
-    timestamp: Date.now(),     // epoch milliseconds
 });
 ```
 
@@ -202,7 +253,7 @@ The `.catch()` handler silently swallows errors for cases where the service work
 
 ## Layer 2: Chrome Tabs API (All Pages)
 
-**File:** `src/background/service-worker.ts`
+**File:** `src/background/main.ts`
 
 The service worker uses Chrome extension APIs to detect tab switches that content scripts cannot observe.
 
@@ -310,14 +361,14 @@ When both layers fire for the same event (e.g., switching from one HTTPS tab to 
 #### Switching from `https://github.com` to `chrome://settings`
 
 1. `tabs.onActivated` fires → `updateActiveTabFromApi()` queries the active tab → gets `chrome://settings` → logs it as active.
-2. The GitHub content script fires `visibilitychange` (hidden) → sends `PAGE_VISIBILITY_CHANGED` with `visible: false` → service worker updates GitHub's entry.
+2. The GitHub content script fires `visibilitychange` (hidden) → sends `page:visibility` with `visible: false` → service worker updates GitHub's entry.
 
 Result: `{ tabId: X, url: "chrome://settings", title: "Settings", visible: true }`
 
 #### Switching from `chrome://settings` to `https://github.com`
 
 1. `tabs.onActivated` fires → `updateActiveTabFromApi()` queries the active tab → gets GitHub → logs it as active.
-2. The GitHub content script fires `visibilitychange` (visible) → sends `PAGE_VISIBILITY_CHANGED` with `visible: true` → service worker updates GitHub's entry (already marked visible by the API layer).
+2. The GitHub content script fires `visibilitychange` (visible) → sends `page:visibility` with `visible: true` → service worker updates GitHub's entry (already marked visible by the API layer).
 
 Result: `{ tabId: Y, url: "https://github.com", title: "GitHub", visible: true }`
 
@@ -432,7 +483,7 @@ These URLs never get content script injection:
 - `chrome-extension://` (extension pages)
 - `about:blank`, `about:newtab`
 - `data:` URLs
-- `file://` URLs (unless `"file:///*/*"` is added to matches AND the user grants file access in `chrome://extensions`)
+- `file://` URLs (covered by `<all_urls>` match pattern, but user must grant file access in `chrome://extensions`)
 - Chrome Web Store (`https://chrome.google.com/webstore/...` — blocked by Chrome policy)
 - `view-source:` URLs
 
@@ -466,23 +517,31 @@ export default defineManifest({
         default_popup: "src/popup/index.html",
     },
     background: {
-        service_worker: "src/background/service-worker.ts",
+        service_worker: "src/background/main.ts",
         type: "module",
     },
     content_scripts: [
         {
             js: ["src/content/main.ts"],
-            matches: ["https://*/*"],
+            matches: ["<all_urls>"],
         },
     ],
-    permissions: ["sidePanel", "contentSettings", "tabs", "windows"],
+    permissions: [
+        "alarms",
+        "storage",
+        "tabs",
+        "webNavigation",
+        "downloads",
+        "windows",
+    ],
+    host_permissions: ["http://localhost:5000/*"],
     side_panel: {
         default_path: "src/sidepanel/index.html",
     },
 });
 ```
 
-### `src/background/service-worker.ts`
+### `src/background/main.ts`
 
 ```ts
 console.log("[Service Worker] 🚀 Background script initialized");
@@ -517,7 +576,7 @@ function getActiveTab() {
 chrome.runtime.onMessage.addListener((message, sender) => {
     const timestamp = new Date().toISOString();
 
-    if (message.type === "PAGE_VISIBILITY_CHANGED") {
+    if (message.type === "page:visibility") {
         const tabId = sender.tab?.id;
         if (!tabId) return;
 
@@ -598,77 +657,44 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 ```
 
-### `src/content/main.ts` (visibility tracking portion)
+### `src/event/visibility.ts` (visibility tracking)
 
 ```ts
-// ============================================
-// PAGE VISIBILITY TRACKING
-// ============================================
+let lastState: boolean | null = null;
 
-/**
- * Track the last known visibility state to avoid duplicate messages
- */
-let lastVisibilityState: boolean | null = null;
-
-/**
- * Send visibility updates to the service worker.
- * This runs in the page context and gets OS-level visibility changes
- * that the service worker cannot detect on its own.
- */
-function sendVisibilityUpdate(isVisible: boolean) {
-    // Don't send if state hasn't changed
-    if (lastVisibilityState === isVisible) {
-        return;
-    }
-
-    lastVisibilityState = isVisible;
-
-    console.log(
-        `[Content] Sending visibility update: ${isVisible ? "VISIBLE" : "HIDDEN"}`,
-    );
+function send(visible: boolean): void {
+    if (lastState === visible) return;
+    lastState = visible;
 
     chrome.runtime
         .sendMessage({
-            type: "PAGE_VISIBILITY_CHANGED",
-            visible: isVisible,
+            type: "page:visibility",
+            visible,
             url: window.location.href,
             title: document.title,
-            timestamp: Date.now(),
         })
-        .catch((err) => {
-            // Service worker might not be ready yet, that's OK
-            console.debug("Could not send visibility update:", err);
+        .catch(() => {
+            // Service worker might not be ready yet
         });
 }
 
-/**
- * Page Visibility API - detects when tab is hidden/visible
- * This includes:
- * - Switching to another tab
- * - Minimizing the browser
- * - Switching to another application (VS Code, Slack, etc.)
- * - OS-level window changes
- */
-document.addEventListener("visibilitychange", () => {
-    const isVisible = document.visibilityState === "visible";
-    sendVisibilityUpdate(isVisible);
-});
+export function setupVisibility(): void {
+    document.addEventListener("visibilitychange", () => {
+        send(document.visibilityState === "visible");
+    });
 
-/**
- * Window focus/blur - additional signal for when the page gains/loses focus
- * This catches some edge cases the visibility API might miss
- */
-window.addEventListener("focus", () => {
-    sendVisibilityUpdate(true);
-});
+    window.addEventListener("focus", () => send(true));
+    window.addEventListener("blur", () => send(false));
 
-window.addEventListener("blur", () => {
-    sendVisibilityUpdate(false);
-});
+    // Re-send state when page is restored from bfcache
+    window.addEventListener("pageshow", (e) => {
+        if (e.persisted) {
+            lastState = null; // force re-send
+            send(document.visibilityState === "visible");
+        }
+    });
 
-/**
- * Send initial state when the content script loads
- * This ensures the service worker knows about this tab immediately
- */
-sendVisibilityUpdate(document.visibilityState === "visible");
+    // Report initial state
+    send(document.visibilityState === "visible");
+}
 ```

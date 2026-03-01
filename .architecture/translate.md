@@ -24,7 +24,7 @@ Tap → Adapter → Normalizer → Relay ──port──▶ Aggregator
                                          └─────────┘
                                               │
                                               ▼
-                                         sealed[] → Packer → Sync (future)
+                                         sealed[] → Packer → Sync
 ```
 
 Translation happens **at seal time** — when the bundler closes a bundle (tab switch, window blur, or source change), it calls `translate(bundle)` and writes the result into `bundle.text`. This is a one-shot operation: `text` is `null` while the bundle is open, and filled exactly once on seal.
@@ -61,7 +61,7 @@ Each capture type maps to a specific text format:
 | Capture type            | Output format                                                                     | Truncation                              |
 | ----------------------- | --------------------------------------------------------------------------------- | --------------------------------------- |
 | `input.keystroke_batch` | `typed "text"`                                                                    | none                                    |
-| `input.keystroke`       | `pressed Ctrl+Alt+key` (modifier prefixes + key)                                  | none                                    |
+| `input.keystroke`       | `pressed Ctrl+Alt+Shift+Meta+key` (modifier prefixes + key)                       | none                                    |
 | `input.click`           | `clicked "text" (truncated-href…)` or `clicked "text"`                            | href: 40 chars end                      |
 | `input.double_click`    | `double-clicked "text"`                                                           | none                                    |
 | `input.context_menu`    | `right-clicked "text"`                                                            | none                                    |
@@ -84,7 +84,6 @@ Each capture type maps to a specific text format:
 | `nav.title_changed` | `page title → "title"`                        | none              |
 | `tab.created`       | `opened new tab: "title" (truncated-url…)`    | url: 40 chars end |
 | `tab.closed`        | `closed tab`                                  | none              |
-| `attention.active`  | `switched to tab: "title" (truncated-url…)`   | url: 40 chars end |
 | `attention.visible` | `browser gained focus` / `browser lost focus` | none              |
 | `media.audio`       | `audio started playing` / `audio stopped`     | none              |
 | `media.download`    | `downloaded "filename" (state)`               | none              |
@@ -116,17 +115,21 @@ Types not in these tables (`input.composition`) return `null` and are silently s
 - **Null-safe target text.** Click targets use `text ?? ""` because some elements (e.g. icon buttons, images) have no text content.
 - **Form focus fallback chain.** Two separate chains: the entry-level label in `translateEntry` uses `name → placeholder → tag` (from the focused element's target). The per-field labels in `formatField` use `label → name → placeholder → tag` (from `FormFieldInfo`, where `label` is the `<label>` text).
 
-## Call site
+## Call sites
 
-Translation is called in exactly one place:
+Translation is called in two places within [`src/aggregation/bundler.ts`](../src/aggregation/bundler.ts):
 
-**[`src/aggregation/bundler.ts:26`](../src/aggregation/bundler.ts)** — inside `seal()`:
+1. **Line 35** — inside `seal()`:
 
-```typescript
-openBundle.text = translate(openBundle);
-```
+   ```typescript
+   openBundle.text = translate(openBundle);
+   ```
 
-The bundler imports `translate` and calls it when sealing a bundle. The result is stored on `bundle.text` and included in the `bundle.sealed` dev log payload.
+2. **Line 176** — inside `restore()`, when sealing a stale open bundle from a checkpoint:
+
+   ```typescript
+   stale.text = translate(stale);
+   ```
 
 ## File map
 
@@ -134,23 +137,22 @@ The bundler imports `translate` and calls it when sealing a bundle. The result i
 | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | [`src/aggregation/translate.ts`](../src/aggregation/translate.ts) | `translate(bundle)` and `translateEntry(c)` — pure functions, imports `FormFieldInfo` for field rendering |
 | [`src/aggregation/types.ts`](../src/aggregation/types.ts)         | `Bundle`, `BundleEntry`, `StampedCapture`, `StampedSignal` type definitions consumed by translate         |
-| [`src/aggregation/bundler.ts`](../src/aggregation/bundler.ts)     | Only call site — `seal()` calls `translate(openBundle)`                                                   |
+| [`src/aggregation/bundler.ts`](../src/aggregation/bundler.ts)     | Call sites — `seal()` calls `translate(openBundle)`, `restore()` calls `translate(stale)`                 |
 | [`src/event/types.ts`](../src/event/types.ts)                     | `Capture` discriminated union and all payload interfaces that translate switches on                       |
 
 ## Relationship to the aggregation layer
 
 ```text
-types.ts          ← StampedCapture, StampedSignal, BundleEntry, Bundle, Transition, UNKNOWN, Aggregator interface
+types.ts          ← StampedCapture, StampedSignal, BundleEntry, Bundle, Transition, UNKNOWN, Aggregator, Checkpoint
 translate.ts      ← Bundle → string (this doc)
-bundler.ts        ← state machine: ingest / ingestSignal / seal / transition (calls translate on seal)
-index.ts          ← createAggregator() composes bundler, stamps captures + signals, routes visibility events
+bundler.ts        ← state machine: ingest / ingestSignal / seal / transition (calls translate on seal and restore)
+index.ts          ← createAggregator() composes bundler, stamps captures + signals, routes visibility events, tracks sourceUrls
 ```
 
 The aggregator is wired into the service worker at [`src/background/main.ts`](../src/background/main.ts):
 
 - Capture port handler calls `aggregator.ingest(capture, tabId)`
 - Chrome API listeners call `aggregator.ingestSignal(signal, tabId)` for signal types (nav, tab, media)
-- Content script `page:visibility` handler calls `aggregator.onVisibilityChanged(tabId, visible)` — drives navigation transitions
-- `aggregator.onOffBrowser(cb)` manages idle sync alarms
+- The dual-layer active tab tracking (content script `page:visibility` + Chrome `tabs.onActivated` / `windows.onFocusChanged`) calls `aggregator.setActiveTab(tabId | null, url?)` — drives navigation transitions
 
 Dev panel events for the aggregation layer are registered in [`src/dev/panels/FilterToggles.tsx`](../src/dev/panels/FilterToggles.tsx) under the `AGGREGATOR` group.

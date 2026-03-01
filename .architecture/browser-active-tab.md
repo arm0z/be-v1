@@ -13,7 +13,7 @@ To solve this, we combine two things:
 
 ## Example Output
 
-Here's what the service worker console looks like in real-time. Each line is logged from `service-worker.ts` when a visibility change occurs:
+Here's what the service worker console looks like in real-time. Each line is logged from `main.ts` when a visibility change occurs:
 
 ```log
 2026-03-01T05:16:52.297Z Active Chrome tab: {tabId: 607215597, url: 'https://claude.ai/recents', title: 'Claude', visible: true}
@@ -66,7 +66,7 @@ Here's what the service worker console looks like in real-time. Each line is log
 │  └──────┬────────┘  └──────┬────────┘  └──────┬────────┘         │
 │         │                  │                  │                  │
 │         │   chrome.runtime.sendMessage()      │                  │
-│         │   {type: "PAGE_VISIBILITY_CHANGED"} │                  │
+│         │   {type: "page:visibility"} │                  │
 │         ▼                  ▼                  ▼                  │
 │  ┌─────────────────────────────────────────────────────────┐     │
 │  │                   Service Worker                        │     │
@@ -94,7 +94,7 @@ my-extension/
 │   └── logo.png                # Extension icon
 └── src/
     ├── background/
-    │   └── service-worker.ts   # Central tab state registry
+    │   └── main.ts   # Central tab state registry
     └── content/
         └── main.ts             # Visibility detection per page
 ```
@@ -119,13 +119,13 @@ export default defineManifest({
         48: "public/logo.png",
     },
     background: {
-        service_worker: "src/background/service-worker.ts",
+        service_worker: "src/background/main.ts",
         type: "module",
     },
     content_scripts: [
         {
             js: ["src/content/main.ts"],
-            matches: ["https://*/*"],
+            matches: ["<all_urls>"],
         },
     ],
     permissions: ["tabs"],
@@ -134,16 +134,16 @@ export default defineManifest({
 
 **What each part does:**
 
-| Field                        | Purpose                                                  |
-| ---------------------------- | -------------------------------------------------------- |
-| `manifest_version: 3`        | Required for modern Chrome extensions                    |
-| `background.service_worker`  | Points to the service worker file that manages tab state |
-| `background.type: "module"`  | Allows using ES module `import`/`export` syntax          |
-| `content_scripts[0].js`      | The script injected into every page to detect visibility |
-| `content_scripts[0].matches` | `"https://*/*"` means inject on every HTTPS page         |
-| `permissions: ["tabs"]`      | Required to access `sender.tab.id` in message handlers   |
+| Field                        | Purpose                                                           |
+| ---------------------------- | ----------------------------------------------------------------- |
+| `manifest_version: 3`        | Required for modern Chrome extensions                             |
+| `background.service_worker`  | Points to the service worker file that manages tab state          |
+| `background.type: "module"`  | Allows using ES module `import`/`export` syntax                   |
+| `content_scripts[0].js`      | The script injected into every page to detect visibility          |
+| `content_scripts[0].matches` | `"<all_urls>"` means inject on every page the browser allows      |
+| `permissions: ["tabs"]`      | Required to access `sender.tab.id` in message handlers            |
 
-> **Note:** The `matches` pattern `"https://*/*"` only covers HTTPS pages. If you need HTTP too, add `"http://*/*"`. Chrome internal pages (`chrome://`, `chrome-extension://`) cannot be injected into.
+> **Note:** The `matches` pattern `"<all_urls>"` covers HTTP, HTTPS, and file:// pages (with user permission). Chrome internal pages (`chrome://`, `chrome-extension://`) cannot be injected into.
 
 If you want to also use a static `manifest.json` instead of the CRXJS dynamic config:
 
@@ -200,15 +200,13 @@ function sendVisibilityUpdate(isVisible: boolean) {
 
     chrome.runtime
         .sendMessage({
-            type: "PAGE_VISIBILITY_CHANGED",
+            type: "page:visibility",
             visible: isVisible,
             url: window.location.href,
             title: document.title,
-            timestamp: Date.now(),
         })
-        .catch((err) => {
-            // Service worker might not be ready yet, that's OK
-            console.debug("Could not send visibility update:", err);
+        .catch(() => {
+            // Service worker might not be ready yet
         });
 }
 
@@ -245,27 +243,35 @@ window.addEventListener("blur", () => {
  * were already open when the extension was installed/reloaded.
  */
 sendVisibilityUpdate(document.visibilityState === "visible");
+
+// Re-send state when page is restored from bfcache
+window.addEventListener("pageshow", (e) => {
+    if (e.persisted) {
+        lastVisibilityState = null; // force re-send
+        sendVisibilityUpdate(document.visibilityState === "visible");
+    }
+});
 ```
 
-#### How the three event listeners work together
+#### How the four event listeners work together
 
-| Event              | When it fires                 | Detects                                        |
-| ------------------ | ----------------------------- | ---------------------------------------------- |
-| `visibilitychange` | Tab becomes hidden or visible | Tab switching, browser minimize, app switching |
-| `focus`            | Page gains keyboard focus     | Clicking back into the browser window          |
-| `blur`             | Page loses keyboard focus     | Clicking away from the browser                 |
+| Event              | When it fires                              | Detects                                        |
+| ------------------ | ------------------------------------------ | ---------------------------------------------- |
+| `visibilitychange` | Tab becomes hidden or visible              | Tab switching, browser minimize, app switching |
+| `focus`            | Page gains keyboard focus                  | Clicking back into the browser window          |
+| `blur`             | Page loses keyboard focus                  | Clicking away from the browser                 |
+| `pageshow`         | Page restored from bfcache (`e.persisted`) | Back/forward navigation cache restoration      |
 
-The `visibilitychange` event does the heavy lifting. The `focus`/`blur` events are a safety net for edge cases.
+The `visibilitychange` event does the heavy lifting. The `focus`/`blur` events are a safety net for edge cases. The `pageshow` handler ensures bfcache-restored pages re-announce their visibility.
 
 #### The message shape
 
 ```ts
 {
-    type: "PAGE_VISIBILITY_CHANGED",  // Identifies this message type
+    type: "page:visibility",  // Identifies this message type
     visible: boolean,                  // true = user is looking at this tab
     url: string,                       // window.location.href
     title: string,                     // document.title
-    timestamp: number,                 // Date.now() in milliseconds
 }
 ```
 
@@ -289,7 +295,7 @@ The `.catch()` on `chrome.runtime.sendMessage()` handles a common scenario: the 
 
 ### 3. Service Worker — Central State Registry
 
-**`src/background/service-worker.ts`**
+**`src/background/main.ts`**
 
 This is the brain of the system. It receives visibility messages from all content scripts and maintains a single source of truth for which tab is currently active.
 
@@ -336,7 +342,7 @@ function getActiveTab() {
 chrome.runtime.onMessage.addListener((message, sender) => {
     const timestamp = new Date().toISOString();
 
-    if (message.type === "PAGE_VISIBILITY_CHANGED") {
+    if (message.type === "page:visibility") {
         const tabId = sender.tab?.id;
         if (!tabId) return;
 
@@ -402,7 +408,7 @@ chrome.runtime.onMessage.addListener((message, sender) => { ... })
 
 The listener:
 
-1. Checks `message.type === "PAGE_VISIBILITY_CHANGED"` to filter for our messages
+1. Checks `message.type === "page:visibility"` to filter for our messages
 2. Extracts `sender.tab?.id` — the `?.` handles the case where the message didn't come from a tab
 3. Updates the `tabStates` Map with the new state
 4. Calls `getActiveTab()` and logs the result
@@ -537,7 +543,7 @@ Then in Chrome:
 
 ### Content scripts only run on matching pages
 
-The `matches: ["https://*/*"]` pattern means the extension only tracks HTTPS pages. Chrome internal pages (`chrome://settings`, `chrome://extensions`, the New Tab page) and `chrome-extension://` pages are **not tracked**. If the user switches to one of these pages, the last tracked tab will go to `null` with no replacement.
+The `matches: ["<all_urls>"]` pattern covers HTTP, HTTPS, and file:// pages (with user permission). Chrome internal pages (`chrome://settings`, `chrome://extensions`, the New Tab page) and `chrome-extension://` pages are **not tracked** by content scripts. If the user switches to one of these pages, only the Chrome Tabs API layer (Layer 2) provides tracking.
 
 ### Service worker lifecycle (MV3)
 

@@ -32,16 +32,16 @@ Unknown extensions default to `text`.
 
 ### 3. Per-category extraction
 
-| Category                            | Strategy                                                           | Budget |
-| ----------------------------------- | ------------------------------------------------------------------ | ------ |
-| `text`                              | `document.body.innerText`                                          | 65 KB  |
-| `markup`                            | `document.documentElement.outerHTML`                               | 65 KB  |
-| `pdf`                               | Lazy-loads `pdfjs-dist`, iterates pages, joins `TextContent` items | 65 KB  |
-| `image`, `audio`, `video`, `binary` | `innerText` if >20 chars, else `[File: filename]`                  | 65 KB  |
+| Category                            | Strategy                                                           | Budget       |
+| ----------------------------------- | ------------------------------------------------------------------ | ------------ |
+| `text`                              | `document.body.innerText`                                          | 65,000 bytes |
+| `markup`                            | `document.documentElement.outerHTML`                               | 65,000 bytes |
+| `pdf`                               | Lazy-loads `pdfjs-dist`, iterates pages, joins `TextContent` items | 65,000 bytes |
+| `image`, `audio`, `video`, `binary` | `innerText` if >20 chars, else `[File: filename]`                  | 65,000 bytes |
 
 ### 4. PDF extraction
 
-PDFs use `pdfjs-dist` loaded via dynamic `import()` to avoid bundling the library for non-PDF pages. The worker is configured from `pdfjs-dist/build/pdf.worker.min.mjs`. Pages are iterated sequentially, accumulating text until the 65 KB budget is reached.
+PDFs use `pdfjs-dist` loaded via dynamic `import()` to avoid bundling the library for non-PDF pages. The worker is configured from `pdfjs-dist/build/pdf.worker.min.mjs`. Pages are iterated sequentially, accumulating text until the 65,000 bytes budget is reached.
 
 ## Emitted event
 
@@ -52,7 +52,7 @@ PDFs use `pdfjs-dist` loaded via dynamic `import()` to avoid bundling the librar
     context: "root",
     payload: {
         url: string,    // window.location.href
-        text: string,   // extracted content (up to 65KB)
+        text: string,   // extracted content (up to 65,000 bytes)
         length: number, // text.length after extraction
     }
 }

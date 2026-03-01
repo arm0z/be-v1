@@ -123,14 +123,14 @@ Events reach the service worker through two paths:
 
 | Layer         | Events                                                       |
 | ------------- | ------------------------------------------------------------ |
-| 4. Keystrokes | `input.keystroke_batch`                                      |
+| 4. Keystrokes | `input.keystroke_batch`, `input.keystroke` (meaningful only) |
 | 5. Mouse      | `input.click`, `input.double_click`, `input.context_menu`    |
 | 6. Scroll     | `input.scroll`                                               |
 | 7. Clipboard  | `input.selection`, `input.copy`, `input.paste`               |
 | 8. Forms      | `input.form_focus`, `input.form_change`, `input.form_submit` |
 | Adapters      | `html.content`, `file.content`                               |
 
-The Normalizer consumes raw `input.keystroke` and `input.composition` events — neither reaches the Relay. Printable keystrokes are batched into `input.keystroke_batch` (emitted after 1 s idle). Non-printable/modified keystrokes and all composition events are consumed without replacement.
+The Normalizer consumes raw `input.keystroke` and `input.composition` events. Printable keystrokes (single-character keys without Ctrl/Alt/Meta) are batched into `input.keystroke_batch` (emitted after 1 s idle). **Meaningful** non-printable keystrokes — action keys (Enter, Backspace, Delete, Tab, Escape, arrow keys, Home, End, PageUp, PageDown) and modifier combos (Ctrl+X, Alt+F, etc.) — flush the buffer and pass through as raw `input.keystroke` events. Lone modifier presses, repeat keys, and all `input.composition` events are consumed without replacement.
 
 **Direct in service worker** (Chrome API listeners in `background/main.ts`, no pipeline):
 
@@ -141,7 +141,7 @@ The Normalizer consumes raw `input.keystroke` and `input.composition` events —
 | 3. Attention  | `attention.visible`                                                                                              |
 | 9. Media      | `media.audio`, `media.download`                                                                                  |
 
-Most of these come from Chrome extension APIs that are only available in the service worker context. `attention.visible` is the exception — it originates from content scripts via `visibility.ts`, which sends `{ type: "page:visibility", visible, url, title }` to the service worker using `chrome.runtime.sendMessage`. The service worker handler calls both `aggregator.onVisibilityChanged(tabId, visible)` (drives navigation) and `aggregator.ingestSignal(...)` (records as bundle content). See [navigation.md](./navigation.md) for the full visibility data flow.
+Most of these come from Chrome extension APIs that are only available in the service worker context. `attention.visible` is the exception — it originates from content scripts via `visibility.ts`, which sends `{ type: "page:visibility", visible, url, title }` to the service worker using `chrome.runtime.sendMessage`. The service worker handler calls `aggregator.setActiveTab(tabId, url)` or `aggregator.setActiveTab(null)` (drives navigation transitions), and also `aggregator.ingestSignal(...)` (records as bundle content). See [navigation.md](./navigation.md) for the full visibility data flow.
 
 ```typescript
 // ── Pipeline stages ─────────────────────────────────────────
@@ -366,7 +366,7 @@ function observeSpaNavigation(onNavigate: (url: string) => void): void {
 ```text
 ┌─ Service Worker ────────────────────────────────────────────────────────┐
 │                                                                         │
-│  Captures arrive via chrome.runtime.onMessage                           │
+│  Captures arrive via chrome.runtime.onConnect port                      │
 │                          │                                              │
 │                          ▼                                              │
 │  ┌─ Aggregator ────────────────────────────────────────────────────────┐│
@@ -409,15 +409,15 @@ function observeSpaNavigation(onNavigate: (url: string) => void): void {
 
 ### Aggregation Glossary
 
-| Term                | What it is                                                                                                                                                                                                                                                                                |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **StampedCapture**  | A Capture with `tabId` and `source` stamped on by the service worker. The content script doesn't know its tab ID — the service worker reads it from `sender.tab.id` and computes `source` as `context@tabId`.                                                                             |
-| **Bundle**          | A collection of StampedCaptures from a single source during a single continuous focus span. Opened when a source gains focus, sealed when focus shifts away. On seal, `translate()` renders captures into `text`.                                                                         |
-| **Translate**       | A function `(bundles: Bundle[]) => string` that renders Bundles into a single human/LLM-readable text stream. Runs on seal. Each Bundle stores the result in its `text` field.                                                                                                            |
-| **Edge**            | A directed, weighted connection between two sources in the navigation graph. Weight increments each time the user transitions from one source to another.                                                                                                                                 |
-| **`"off_browser"`** | The off-browser source. A regular node in the graph with `source: "off_browser"`. Has no Bundle (nothing to capture), but edges connect to and from it so the graph knows when the user left and returned. The transition to `off_browser` is deferred by 200 ms to absorb focus flicker. |
-| **Group**           | A cluster of related sources discovered by partitioning the navigation graph (community detection). Sources that the user frequently navigates between end up in the same Group.                                                                                                          |
-| **Packet**          | The delivery unit. Contains Groups, each with its associated Bundles, plus the navigation graph edges. Sent to the server on sync.                                                                                                                                                        |
+| Term                | What it is                                                                                                                                                                                                                                                                                          |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **StampedCapture**  | A Capture with `tabId` and `source` stamped on by the service worker. The content script doesn't know its tab ID — the service worker reads it from `sender.tab.id` and computes `source` as `context@tabId`.                                                                                       |
+| **Bundle**          | A collection of StampedCaptures from a single source during a single continuous focus span. Opened when a source gains focus, sealed when focus shifts away. On seal, `translate()` renders captures into `text`.                                                                                   |
+| **Translate**       | A pure function `(bundle: Bundle) => string` that renders a single Bundle into a human/LLM-readable text stream. Runs on seal. Each Bundle stores the result in its `text` field.                                                                                                                   |
+| **Edge**            | A directed, weighted connection between two sources in the navigation graph. Weight increments each time the user transitions from one source to another.                                                                                                                                           |
+| **`"off_browser"`** | The off-browser source. A regular node in the graph with `source: "off_browser"`. Has no Bundle (nothing to capture), but edges connect to and from it so the graph knows when the user left and returned. The transition to `off_browser` happens immediately when `setActiveTab(null)` is called. |
+| **Group**           | A cluster of related sources discovered by partitioning the navigation graph (community detection). Sources that the user frequently navigates between end up in the same Group.                                                                                                                    |
+| **Packet**          | The delivery unit. Contains Groups, each with its associated Bundles, plus the navigation graph edges. Sent to the server on sync.                                                                                                                                                                  |
 
 ### Aggregation Overview
 
@@ -427,9 +427,9 @@ The Aggregation Layer lives in the service worker. It has two responsibilities:
 
 - A **Bundle** is open for exactly one source at a time — the one the user is currently focused on.
 - When focus shifts (tab switch, browser blur, window change), the current Bundle is **sealed**, `translate()` renders its captures into the `text` field, and a new Bundle is opened for the newly focused source.
-- When the user leaves the browser entirely, the current Bundle is sealed and the active source becomes `"off_browser"` (after a 200 ms settle delay to absorb focus flicker). No Bundle is opened for it — there's nothing to capture. When the user returns, a new Bundle opens for the source they return to. The same treatment applies when switching to a window with no tracked tab (e.g. DevTools, extension popup, `chrome://` pages).
+- When the user leaves the browser entirely, the current Bundle is sealed and the active source becomes `"off_browser"` immediately. No Bundle is opened for it — there's nothing to capture. When the user returns, a new Bundle opens for the source they return to. The same treatment applies when switching to a window with no tracked tab (e.g. DevTools, extension popup, `chrome://` pages).
 
-**2. Translation** — on seal, `translate([bundle])` converts the Bundle's captures into a single plain-text stream stored in `bundle.text`. This is the LLM-readable representation of the user's activity during that focus span. The translate function takes `Bundle[]` so it can also be called on a group of Bundles to produce a combined narrative.
+**2. Translation** — on seal, `translate(bundle)` converts the Bundle's captures into a single plain-text stream stored in `bundle.text`. This is the LLM-readable representation of the user's activity during that focus span.
 
 **3. Navigation graph** — alongside bundling, every focus shift records a directed edge in a weighted graph.
 
@@ -445,7 +445,7 @@ The Aggregation Layer lives in the service worker. It has two responsibilities:
 /**
  * The service worker stamps tabId and source onto each Capture
  * when it receives it. The content script doesn't know its own tabId —
- * it comes from sender.tab.id in chrome.runtime.onMessage.
+ * it comes from port.sender.tab.id in chrome.runtime.onConnect.
  */
 type StampedCapture = Capture & {
   tabId: string;         // e.g. "42"
@@ -461,12 +461,12 @@ type Bundle = {
 };
 
 /**
- * Translates sealed Bundles into a single human/LLM-readable text stream.
- * Runs once per seal. The output is a plain text rendering of the captures
- * in chronological order — e.g. timestamps, click targets, typed text,
- * navigation events, snapshot summaries.
+ * Translates a sealed Bundle into a human/LLM-readable text stream.
+ * Pure function, runs once per seal. The output is a plain text rendering
+ * of the captures in chronological order — timestamps, click targets,
+ * typed text, navigation events, page content.
  */
-type Translate = (bundles: Bundle) => string;
+type Translate = (bundle: Bundle) => string;
 
 const OFF_BROWSER = "off_browser";
 
@@ -525,63 +525,57 @@ const sealed: Bundle[] = [];
 const edges: Map<string, Edge> = new Map(); // key: "from -> to"
 
 // ── Receive Captures from the Event Layer ───────────────────
+// Content scripts connect via chrome.runtime.connect (persistent port).
+// Each port message is a Capture from the content script pipeline.
 
-chrome.runtime.onMessage.addListener((msg, sender) => {
-  if (msg.type !== "capture") return;
-  const capture: Capture = msg.payload;
-  const tabId = String(sender.tab?.id ?? "unknown");
-  const source = `${capture.context}@${tabId}`;
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "capture") return;
+  const tabId = String(port.sender?.tab?.id ?? "unknown");
 
-  // stamp tabId and source onto the capture
-  const stamped: StampedCapture = { ...capture, tabId, source };
+  port.onMessage.addListener((capture: Capture) => {
+    const source = `${capture.context}@${tabId}`;
+    const stamped: StampedCapture = { ...capture, tabId, source };
 
-  if (!openBundle || openBundle.source !== source) {
-    transition(source);
-  }
+    if (!openBundle || openBundle.source !== source) {
+      transition(source);
+    }
 
-  openBundle!.captures.push(stamped);
+    openBundle!.captures.push(stamped);
+  });
 });
 
 // ── Focus shifts ────────────────────────────────────────────
 
-let offBrowserTimer: number | null = null;
+// Both Chrome API listeners and content script visibility messages update
+// a shared tabStates Map. When the active tab changes, aggregator.setActiveTab()
+// is called, which translates into bundler.transition() if the source differs.
 
-function startOffBrowserTimer(): void {
-  if (offBrowserTimer) clearTimeout(offBrowserTimer);
-  seal();
-  offBrowserTimer = setTimeout(() => {
-    offBrowserTimer = null;
-    transition(OFF_BROWSER);
-  }, 200);
-}
-
-chrome.tabs.onActivated.addListener((info) => {
-  activeTabPerWindow.set(info.windowId, info.tabId);
-  // If the browser is losing OS focus, Chrome may fire a spurious
-  // onTabActivated. Don't let it cancel the off-browser timer.
-  if (offBrowserTimer) return;
-  const source = tabSources.get(info.tabId);
-  if (source) transition(source);
-  else seal();
-});
+chrome.tabs.onActivated.addListener(() => updateActiveTabFromApi());
 
 chrome.windows.onFocusChanged.addListener((windowId) => {
   if (windowId === chrome.windows.WINDOW_ID_NONE) {
-    startOffBrowserTimer();
+    // User left browser — mark all tabs not visible, transition to off_browser
+    for (const [id, state] of tabStates.entries()) {
+      if (state.visible) tabStates.set(id, { ...state, visible: false });
+    }
+    aggregator.setActiveTab(null);  // → bundler.transition(OFF_BROWSER)
   } else {
-    if (offBrowserTimer) { clearTimeout(offBrowserTimer); offBrowserTimer = null; }
-    const tabId = activeTabPerWindow.get(windowId);
-    const source = tabId ? tabSources.get(tabId) : undefined;
-    if (source) transition(source);
-    else startOffBrowserTimer(); // DevTools, extension popup, etc.
+    updateActiveTabFromApi();
   }
 });
 
 // Content script visibility (Page Visibility API)
+// Received via chrome.runtime.onMessage (separate from the capture port)
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg.type === "page:visibility") {
-    // Ingested as attention.visible signal into the active bundle
-    ingestSignal({ type: "attention.visible", visible: msg.visible, ... }, sender.tab.id);
+    const tabId = sender.tab?.id;
+    if (msg.visible) {
+      aggregator.setActiveTab(tabId, msg.url);  // drives navigation transitions
+    } else {
+      // tabStates updated; if no visible tab remains → setActiveTab(null)
+    }
+    // Also ingested as attention.visible signal into the active bundle
+    aggregator.ingestSignal({ type: "attention.visible", visible: msg.visible, ... }, tabId);
   }
 });
 
@@ -613,7 +607,7 @@ function transition(to: string): void {
 function seal(): void {
   if (!openBundle) return;
   openBundle.endedAt = Date.now();
-  openBundle.text = translate([openBundle]);
+  openBundle.text = translate(openBundle);
   sealed.push(openBundle);
   openBundle = null;
 }
@@ -708,7 +702,7 @@ Two `chrome.alarms` control when a flush + sync happens:
 User leaves browser
         │
         ▼
-  aggregator transitions to off_browser (1s settle)
+  aggregator transitions to off_browser
         │
         ▼
   chrome.alarms.create("sync-idle", { delayInMinutes: 10 })
