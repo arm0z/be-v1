@@ -135,22 +135,29 @@ export function createAggregator(): Aggregator {
     }
 
     function onTabActivated(tabId: string, windowId: number): void {
+        const prevTabId = activeTabPerWindow.get(windowId);
         activeTabPerWindow.set(windowId, tabId);
 
-        // If the browser is losing OS focus (offBrowserTimer was set by
-        // onWindowFocusChanged(WINDOW_ID_NONE)), Chrome may fire a
-        // spurious onTabActivated as part of the same event sequence.
-        // Don't let it cancel the off-browser timer or create a wrong
-        // edge. activeTabPerWindow is still updated so we know which
-        // tab to return to when focus comes back.
-        if (offBrowserTimer !== null) return;
-
-        const source = tabSources.get(tabId);
-        if (source) {
-            bundler.transition(source);
-        } else {
-            bundler.seal();
+        if (offBrowserTimer !== null) {
+            // During a genuine alt-tab away, Chrome sometimes fires a
+            // spurious onTabActivated for the *same* tab.  Keep the
+            // timer running so we still transition to off-browser.
+            //
+            // But if the tabId is *different*, the user clicked a new
+            // tab while the WINDOW_ID_NONE settle timer was pending
+            // (common on Linux / when DevTools is a separate window).
+            // Cancel the timer and process the switch normally — the
+            // user is still in Chrome.
+            if (prevTabId === tabId) return;
+            cancelOffBrowser();
         }
+
+        let source = tabSources.get(tabId);
+        if (!source) {
+            source = `root@${tabId}`;
+            tabSources.set(tabId, source);
+        }
+        bundler.transition(source);
         emitState();
     }
 
@@ -164,17 +171,16 @@ export function createAggregator(): Aggregator {
         } else {
             cancelOffBrowser();
             const tabId = activeTabPerWindow.get(windowId);
-            const source = tabId ? tabSources.get(tabId) : undefined;
-            if (source) {
+            if (tabId) {
+                let source = tabSources.get(tabId);
+                if (!source) {
+                    source = `root@${tabId}`;
+                    tabSources.set(tabId, source);
+                }
                 bundler.transition(source);
-            } else {
-                // No source for this window's active tab (e.g. DevTools,
-                // extension popup, chrome:// page). Treat the same as
-                // the browser losing focus — seal and start off-browser
-                // timer. If captures arrive from this tab before the
-                // timer fires, ingest() will transition naturally.
-                startOffBrowserTimer();
             }
+            // No tabId means a no-tab window (DevTools, extension popup).
+            // User is still in Chrome — don't start off-browser timer.
         }
         emitState();
     }

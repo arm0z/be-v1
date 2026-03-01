@@ -4,6 +4,7 @@ import type { DevChannel, DevEntry } from "@/event/dev";
 import { cn } from "@/lib/utils";
 import {
 	Check,
+	ChevronDown,
 	ChevronRight,
 	Copy,
 	Pause,
@@ -180,6 +181,70 @@ function EventFilterPopover({
 	);
 }
 
+function formatEntryTitle(entry: DevEntry) {
+	const ts = formatTimestamp(entry.timestamp);
+	const ev = entry.event ? ` ${entry.event}` : "";
+	return `[${entry.channel}] ${ts}${ev} – ${entry.message}`;
+}
+
+function CopyDropdown({ filtered }: { filtered: DevEntry[] }) {
+	const [open, setOpen] = useState(false);
+	const [feedback, setFeedback] = useState<string | null>(null);
+	const containerRef = useRef<HTMLDivElement>(null);
+
+	useEffect(() => {
+		if (!open) return;
+		function onClickOutside(e: MouseEvent) {
+			if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+				setOpen(false);
+			}
+		}
+		document.addEventListener("mousedown", onClickOutside);
+		return () => document.removeEventListener("mousedown", onClickOutside);
+	}, [open]);
+
+	const copy = useCallback(async (text: string, label: string) => {
+		await navigator.clipboard.writeText(text);
+		setOpen(false);
+		setFeedback(label);
+		setTimeout(() => setFeedback(null), 1500);
+	}, []);
+
+	return (
+		<div ref={containerRef} className="relative">
+			<Button
+				variant="ghost"
+				size="icon-xs"
+				onClick={() => setOpen((p) => !p)}
+				className="text-muted-foreground"
+				title="More copy options"
+			>
+				{feedback ? (
+					<Check className="text-emerald-400" />
+				) : (
+					<ChevronDown className={cn("transition-transform", open && "rotate-180")} />
+				)}
+			</Button>
+
+			{open && (
+				<div className="absolute right-0 top-full z-50 mt-1 min-w-40 rounded-lg border bg-background py-1 shadow-lg">
+					<button
+						type="button"
+						className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+						onClick={() => copy(
+							JSON.stringify(filtered, null, 2),
+							"detailed",
+						)}
+					>
+						<Copy className="h-3 w-3" />
+						Copy Detailed
+					</button>
+				</div>
+			)}
+		</div>
+	);
+}
+
 function LogToolbar({
 	search,
 	onSearchChange,
@@ -187,7 +252,7 @@ function LogToolbar({
 	onTogglePause,
 	count,
 	onClear,
-	onCopyAll,
+	filtered,
 	filter,
 	setEventFilter,
 }: {
@@ -197,17 +262,18 @@ function LogToolbar({
 	onTogglePause: () => void;
 	count: number;
 	onClear: () => void;
-	onCopyAll: () => void;
+	filtered: DevEntry[];
 	filter: DevFilter | null;
 	setEventFilter: (events: Partial<Record<string, boolean>>) => void;
 }) {
 	const [copyFeedback, setCopyFeedback] = useState(false);
 
-	const handleCopyAll = useCallback(() => {
-		onCopyAll();
+	const handleCopyTitles = useCallback(() => {
+		const titles = filtered.map(formatEntryTitle).join("\n");
+		navigator.clipboard.writeText(titles);
 		setCopyFeedback(true);
 		setTimeout(() => setCopyFeedback(false), 1500);
-	}, [onCopyAll]);
+	}, [filtered]);
 
 	return (
 		<div className="flex items-center gap-2 border-b bg-background px-3 py-1.5">
@@ -259,13 +325,13 @@ function LogToolbar({
 				{count}
 			</span>
 
-			{/* Copy all */}
+			{/* Copy titles */}
 			<Button
 				variant="ghost"
 				size="xs"
-				onClick={handleCopyAll}
+				onClick={handleCopyTitles}
 				className="text-muted-foreground"
-				title="Copy all visible logs"
+				title="Copy log titles"
 			>
 				{copyFeedback ? (
 					<Check className="text-emerald-400" />
@@ -274,6 +340,9 @@ function LogToolbar({
 				)}
 				Copy
 			</Button>
+
+			{/* Copy options dropdown */}
+			<CopyDropdown filtered={filtered} />
 
 			{/* Clear */}
 			<Button
@@ -574,10 +643,6 @@ export function LogStream({ entries, onClear, filter, setEventFilter }: Props) {
 
 	const groups = useMemo(() => groupConsecutive(filtered), [filtered]);
 
-	const handleCopyAll = useCallback(() => {
-		navigator.clipboard.writeText(JSON.stringify(filtered, null, 2));
-	}, [filtered]);
-
 	// Auto-scroll: only when user is near bottom and not paused
 	const bottomRef = useRef<HTMLDivElement>(null);
 	const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -615,7 +680,7 @@ export function LogStream({ entries, onClear, filter, setEventFilter }: Props) {
 					onTogglePause={togglePause}
 					count={filtered.length}
 					onClear={handleClear}
-					onCopyAll={handleCopyAll}
+					filtered={filtered}
 					filter={filter}
 					setEventFilter={setEventFilter}
 				/>

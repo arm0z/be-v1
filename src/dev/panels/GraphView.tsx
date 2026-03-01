@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { DevEntry } from "@/event/dev";
-import { Boxes, Expand, PanelRight, Scan, Shrink, Waypoints } from "lucide-react";
+import { Boxes, Eclipse, Expand, PanelRight, Scan, Settings2, Shrink, Waypoints } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Props = { entries: DevEntry[] };
@@ -17,11 +17,11 @@ type Node = {
 };
 type Edge = { from: string; to: string; weight: number };
 
-const CHARGE_K = 800;
-const SPRING_K = 0.02;
-const REST_LENGTH = 120;
-const CENTER_K = 0.005;
-const DAMPING = 0.85;
+const DEFAULT_CHARGE_K = 800;
+const DEFAULT_SPRING_K = 0.02;
+const DEFAULT_REST_LENGTH = 120;
+const DEFAULT_CENTER_K = 0.005;
+const DEFAULT_DAMPING = 0.85;
 const MIN_DIST = 20;
 const ENERGY_THRESHOLD = 0.05;
 const NODE_RADIUS = 8;
@@ -32,7 +32,8 @@ const MAX_DOTS = 5000;
 function extractOrigin(id: string): string | null {
 	try {
 		const url = new URL(id);
-		return `${url.protocol}//${url.host}`;
+		if (url.protocol !== "http:" && url.protocol !== "https:") return url.protocol.replace(/:$/, "");
+		return url.host;
 	} catch {
 		return null;
 	}
@@ -76,6 +77,18 @@ export function GraphView({ entries }: Props) {
 	const [hoverNodeId, setHoverNodeId] = useState<string | null>(null);
 	const [activeTab, setActiveTab] = useState<"raw" | "grouped">("raw");
 	const [panelOpen, setPanelOpen] = useState(false);
+	const [dimMode, setDimMode] = useState(false);
+	const dimRef = useRef(false);
+	const [physicsOpen, setPhysicsOpen] = useState(false);
+
+	const physicsRef = useRef({
+		chargeK: DEFAULT_CHARGE_K,
+		springK: DEFAULT_SPRING_K,
+		restLength: DEFAULT_REST_LENGTH,
+		centerK: DEFAULT_CENTER_K,
+		damping: DEFAULT_DAMPING,
+	});
+	const [physics, setPhysics] = useState({ ...physicsRef.current });
 
 	// --- data extraction ---
 	const processEntries = useCallback(() => {
@@ -183,7 +196,7 @@ export function GraphView({ entries }: Props) {
 				let dy = b.y - a.y;
 				let dist = Math.sqrt(dx * dx + dy * dy);
 				if (dist < MIN_DIST) dist = MIN_DIST;
-				const force = CHARGE_K / (dist * dist);
+				const force = physicsRef.current.chargeK / (dist * dist);
 				const fx = (dx / dist) * force;
 				const fy = (dy / dist) * force;
 				a.vx -= fx;
@@ -200,8 +213,8 @@ export function GraphView({ entries }: Props) {
 			const dx = b.x - a.x;
 			const dy = b.y - a.y;
 			const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-			const displacement = dist - REST_LENGTH;
-			const force = SPRING_K * displacement;
+			const displacement = dist - physicsRef.current.restLength;
+			const force = physicsRef.current.springK * displacement;
 			const fx = (dx / dist) * force;
 			const fy = (dy / dist) * force;
 			a.vx += fx;
@@ -212,10 +225,10 @@ export function GraphView({ entries }: Props) {
 
 		let totalEnergy = 0;
 		for (const node of nodes) {
-			node.vx -= node.x * CENTER_K;
-			node.vy -= node.y * CENTER_K;
-			node.vx *= DAMPING;
-			node.vy *= DAMPING;
+			node.vx -= node.x * physicsRef.current.centerK;
+			node.vy -= node.y * physicsRef.current.centerK;
+			node.vx *= physicsRef.current.damping;
+			node.vy *= physicsRef.current.damping;
 			node.x += node.vx;
 			node.y += node.vy;
 			totalEnergy += node.vx * node.vx + node.vy * node.vy;
@@ -284,33 +297,80 @@ export function GraphView({ entries }: Props) {
 
 		// --- edges ---
 		const hoverId = hoverIdRef.current;
+		const dim = dimRef.current && hoverId !== null;
+		const connectedSet = new Set<string>();
+		if (dim) {
+			connectedSet.add(hoverId);
+			for (const edge of edges) {
+				if (edge.from === hoverId) connectedSet.add(edge.to);
+				if (edge.to === hoverId) connectedSet.add(edge.from);
+			}
+		}
+		const EDGE_OFFSET = 5;
 		for (const edge of edges) {
 			const a = nodesRef.current.get(edge.from);
 			const b = nodesRef.current.get(edge.to);
 			if (!a || !b) continue;
 
-			const isHoverEdge =
-				hoverId !== null &&
-				(edge.from === hoverId || edge.to === hoverId);
+			// offset so parallel edges (A→B and B→A) don't overlap
+			const dx = b.x - a.x;
+			const dy = b.y - a.y;
+			const len = Math.sqrt(dx * dx + dy * dy) || 1;
+			const nx = -dy / len * EDGE_OFFSET;
+			const ny = dx / len * EDGE_OFFSET;
+
+			const ax = a.x + nx;
+			const ay = a.y + ny;
+			const bx = b.x + nx;
+			const by = b.y + ny;
+
+			const isOutbound = hoverId !== null && edge.from === hoverId;
+			const isInbound = hoverId !== null && edge.to === hoverId;
+
+			const color = isOutbound
+				? "rgba(96,165,250,0.6)"
+				: isInbound
+					? "rgba(74,222,128,0.6)"
+					: "rgba(160,160,160,0.4)";
+			const lineW = 1 + Math.log2(Math.max(edge.weight, 1));
 
 			ctx.beginPath();
-			ctx.moveTo(a.x, a.y);
-			ctx.lineTo(b.x, b.y);
-			ctx.strokeStyle = isHoverEdge
-				? "rgba(120,180,255,0.6)"
-				: "rgba(160,160,160,0.4)";
-			ctx.lineWidth = 1 + Math.log2(Math.max(edge.weight, 1));
+			ctx.moveTo(ax, ay);
+			ctx.lineTo(bx, by);
+			ctx.strokeStyle = color;
+			ctx.lineWidth = lineW;
 			ctx.stroke();
 
-			const mx = (a.x + b.x) / 2;
-			const my = (a.y + b.y) / 2;
-			ctx.font = "10px sans-serif";
-			ctx.fillStyle = isHoverEdge
-				? "rgba(120,180,255,0.9)"
-				: "rgba(160,160,160,0.6)";
-			ctx.textAlign = "center";
-			ctx.textBaseline = "bottom";
-			ctx.fillText(String(edge.weight), mx, my - 4);
+			// arrowhead at target node edge, sized by weight (capped)
+			const udx = (bx - ax) / len;
+			const udy = (by - ay) / len;
+			const arrowLen = Math.min(4 + Math.log2(Math.max(edge.weight, 1)) * 2, 12);
+			const arrowW = arrowLen * 0.6;
+			const tipX = bx - udx * NODE_RADIUS;
+			const tipY = by - udy * NODE_RADIUS;
+
+			ctx.beginPath();
+			ctx.moveTo(tipX, tipY);
+			ctx.lineTo(tipX - udx * arrowLen + udy * arrowW, tipY - udy * arrowLen - udx * arrowW);
+			ctx.lineTo(tipX - udx * arrowLen - udy * arrowW, tipY - udy * arrowLen + udx * arrowW);
+			ctx.closePath();
+			ctx.fillStyle = color;
+			ctx.fill();
+
+			const isRelated = isOutbound || isInbound;
+			if (!dim || isRelated) {
+				const mx = (ax + bx) / 2;
+				const my = (ay + by) / 2;
+				ctx.font = "10px sans-serif";
+				ctx.fillStyle = isOutbound
+					? "rgba(96,165,250,0.9)"
+					: isInbound
+						? "rgba(74,222,128,0.9)"
+						: "rgba(160,160,160,0.6)";
+				ctx.textAlign = "center";
+				ctx.textBaseline = "bottom";
+				ctx.fillText(String(edge.weight), mx, my - 4);
+			}
 		}
 
 		// --- nodes ---
@@ -327,13 +387,16 @@ export function GraphView({ entries }: Props) {
 				ctx.stroke();
 			}
 
+			const isDimmed = dim && !connectedSet.has(node.id);
 			ctx.beginPath();
 			ctx.arc(node.x, node.y, NODE_RADIUS, 0, Math.PI * 2);
-			ctx.fillStyle = isUnknown
-				? "rgba(120,120,120,0.4)"
-				: isHovered
-					? "hsl(210, 90%, 68%)"
-					: "hsl(210, 80%, 60%)";
+			ctx.fillStyle = isDimmed
+				? "rgba(120,120,120,0.15)"
+				: isUnknown
+					? "rgba(120,120,120,0.4)"
+					: isHovered
+						? "hsl(210, 90%, 68%)"
+						: "hsl(210, 80%, 60%)";
 			ctx.fill();
 
 			if (isUnknown) {
@@ -344,20 +407,19 @@ export function GraphView({ entries }: Props) {
 				ctx.setLineDash([]);
 			}
 
-			// source label
-			ctx.font = "11px sans-serif";
-			ctx.fillStyle = "rgba(220,220,220,0.9)";
-			ctx.textAlign = "center";
-			ctx.textBaseline = "top";
-			ctx.fillText(node.id, node.x, node.y + NODE_RADIUS + 4);
-
-			// clean URL sub-label
+			// URL label then dimmed source (hidden for unconnected nodes in dim mode)
+			const showLabel = !dim || connectedSet.has(node.id);
 			const nodeUrl = urlsRef.current.get(node.id);
-			const origin = nodeUrl ? extractOrigin(nodeUrl) : null;
-			if (origin) {
+			const origin = nodeUrl ? extractOrigin(nodeUrl) : "unknown";
+			if (showLabel) {
+				ctx.textAlign = "center";
+				ctx.textBaseline = "top";
+				ctx.font = "11px sans-serif";
+				ctx.fillStyle = "rgba(220,220,220,0.9)";
+				ctx.fillText(origin, node.x, node.y + NODE_RADIUS + 4);
 				ctx.font = "9px sans-serif";
 				ctx.fillStyle = "rgba(140,140,140,0.4)";
-				ctx.fillText(origin, node.x, node.y + NODE_RADIUS + 18);
+				ctx.fillText(node.id, node.x, node.y + NODE_RADIUS + 18);
 			}
 		}
 
@@ -375,28 +437,11 @@ export function GraphView({ entries }: Props) {
 			);
 		}
 
-		// --- tooltip positioning ---
+		// --- tooltip positioning (bottom-right) ---
 		const tooltipEl = tooltipRef.current;
 		if (tooltipEl && hoverId) {
-			const node = nodesRef.current.get(hoverId);
-			if (node) {
-				const cw = w / dpr;
-				const ch = h / dpr;
-				const sx = node.x * zoom + cw / 2 + pan.x;
-				const sy = node.y * zoom + ch / 2 + pan.y;
-
-				const tw = tooltipEl.offsetWidth;
-				const th = tooltipEl.offsetHeight;
-
-				let tx = sx + 16;
-				let ty = sy - 8;
-				if (tx + tw > cw - 4) tx = sx - tw - 16;
-				if (ty + th > ch - 4) ty = ch - th - 4;
-				if (ty < 4) ty = 4;
-
-				tooltipEl.style.transform = `translate(${tx}px, ${ty}px)`;
-				tooltipEl.style.opacity = "1";
-			}
+			tooltipEl.style.transform = "";
+			tooltipEl.style.opacity = "1";
 		}
 	}, []);
 
@@ -668,7 +713,7 @@ export function GraphView({ entries }: Props) {
 			tooltipContent = (
 				<div
 					ref={tooltipRef}
-					className="pointer-events-none absolute left-0 top-0 z-10 w-52 rounded-lg border border-border/50 bg-popover/95 p-3 text-xs text-popover-foreground opacity-0 shadow-xl backdrop-blur-sm"
+					className="pointer-events-none absolute bottom-3 right-3 z-10 w-52 rounded-lg border border-border/50 bg-popover/95 p-3 text-xs text-popover-foreground opacity-0 shadow-xl backdrop-blur-sm"
 				>
 					<div className="truncate text-sm font-semibold">
 						{node.id}
@@ -700,40 +745,60 @@ export function GraphView({ entries }: Props) {
 						</span>
 					</div>
 
-					{stats.degree > 0 && (
+					{stats.outbound.length > 0 && (
 						<div className="mt-2 space-y-px border-t border-border/30 pt-2">
-							{stats.outbound.map((e) => (
-								<div
-									key={`o-${e.to}`}
-									className="flex justify-between gap-2"
-								>
-									<span className="truncate text-muted-foreground">
-										<span className="text-blue-400">
-											&rarr;
-										</span>{" "}
-										{e.to}
-									</span>
-									<span className="shrink-0 tabular-nums">
-										&times;{e.weight}
-									</span>
-								</div>
-							))}
-							{stats.inbound.map((e) => (
-								<div
-									key={`i-${e.from}`}
-									className="flex justify-between gap-2"
-								>
-									<span className="truncate text-muted-foreground">
-										<span className="text-emerald-400">
-											&larr;
-										</span>{" "}
-										{e.from}
-									</span>
-									<span className="shrink-0 tabular-nums">
-										&times;{e.weight}
-									</span>
-								</div>
-							))}
+							<span className="text-muted-foreground text-[10px] uppercase tracking-wide">Outbound</span>
+							{stats.outbound.map((e) => {
+								const eUrl = urlsRef.current.get(e.to);
+								const eOrigin = eUrl ? extractOrigin(eUrl) : null;
+								return (
+									<div
+										key={`o-${e.to}`}
+										className="flex justify-between gap-2"
+									>
+										<span className="truncate text-muted-foreground">
+											<span className="text-blue-400">
+												&rarr;
+											</span>{" "}
+											{e.to}
+											{eOrigin && (
+												<span className="text-muted-foreground/50"> ({eOrigin})</span>
+											)}
+										</span>
+										<span className="shrink-0 tabular-nums">
+											&times;{e.weight}
+										</span>
+									</div>
+								);
+							})}
+						</div>
+					)}
+					{stats.inbound.length > 0 && (
+						<div className="mt-2 space-y-px border-t border-border/30 pt-2">
+							<span className="text-muted-foreground text-[10px] uppercase tracking-wide">Inbound</span>
+							{stats.inbound.map((e) => {
+								const eUrl = urlsRef.current.get(e.from);
+								const eOrigin = eUrl ? extractOrigin(eUrl) : null;
+								return (
+									<div
+										key={`i-${e.from}`}
+										className="flex justify-between gap-2"
+									>
+										<span className="truncate text-muted-foreground">
+											<span className="text-emerald-400">
+												&larr;
+											</span>{" "}
+											{e.from}
+											{eOrigin && (
+												<span className="text-muted-foreground/50"> ({eOrigin})</span>
+											)}
+										</span>
+										<span className="shrink-0 tabular-nums">
+											&times;{e.weight}
+										</span>
+									</div>
+								);
+							})}
 						</div>
 					)}
 
@@ -785,6 +850,19 @@ export function GraphView({ entries }: Props) {
 					</TabsList>
 				</Tabs>
 				<div className="absolute right-2 top-2 flex gap-1">
+					<Button
+						variant={dimMode ? "default" : "outline"}
+						size="icon-xs"
+						onClick={() => {
+							setDimMode((d) => {
+								dimRef.current = !d;
+								return !d;
+							});
+						}}
+						title={dimMode ? "Disable dim mode" : "Enable dim mode"}
+					>
+						<Eclipse />
+					</Button>
 					<Button
 						variant="outline"
 						size="icon-xs"

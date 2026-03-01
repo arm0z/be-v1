@@ -40,11 +40,11 @@ The bundler doesn't know about Chrome APIs or raw `Capture` objects. It only rec
 
 The bundler is a closure created by `createBundler(graph)`. All state is local variables:
 
-| Variable       | Type             | Initial | Purpose                                                                                                              |
-| -------------- | ---------------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
-| `activeSource` | `string \| null` | `null`  | The source currently being bundled (e.g. `root@42`). `null` before the first capture arrives.                        |
-| `openBundle`   | `Bundle \| null` | `null`  | The bundle currently accumulating captures. `null` after a `seal()` until the next capture reopens one.              |
-| `sealed`       | `Bundle[]`       | `[]`    | Completed bundles waiting to be consumed by the packer/sync layer.                                                   |
+| Variable       | Type             | Initial | Purpose                                                                                                 |
+| -------------- | ---------------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `activeSource` | `string \| null` | `null`  | The source currently being bundled (e.g. `root@42`). `null` before the first capture arrives.           |
+| `openBundle`   | `Bundle \| null` | `null`  | The bundle currently accumulating captures. `null` after a `seal()` until the next capture reopens one. |
+| `sealed`       | `Bundle[]`       | `[]`    | Completed bundles waiting to be consumed by the packer/sync layer.                                      |
 
 ## Operations
 
@@ -148,16 +148,16 @@ The graph is a separate concern — the bundler just calls `recordEdge` and does
 
 The aggregator facade (`index.ts`) translates Chrome events and capture arrivals into bundler operations:
 
-| Chrome event / action                                     | Aggregator method                           | Bundler call                                                                                                                                      |
-| --------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Capture arrives on port                                   | `aggregator.ingest(capture, tabId)`         | `bundler.ingest(stamped)` — stamps with `context@tabId`, may trigger `transition`                                                                 |
-| `chrome.tabs.onActivated` (source known, no timer)        | `aggregator.onTabActivated(tabId)`          | `bundler.transition(source)` — seal + edge + open bundle for new tab                                                                              |
-| `chrome.tabs.onActivated` (source unknown, no timer)      | `aggregator.onTabActivated(tabId)`          | `bundler.seal()` — close current bundle, signals buffer until first capture establishes source                                                     |
-| `chrome.tabs.onActivated` (off-browser timer active)      | `aggregator.onTabActivated(tabId)`          | *skipped* — spurious Chrome event during focus loss, only `activeTabPerWindow` is updated                                                         |
-| `chrome.windows.onFocusChanged(WINDOW_ID_NONE)`           | `aggregator.onWindowFocusChanged(windowId)` | `bundler.seal()` + start 200 ms timer → `bundler.transition(OFF_BROWSER)` if timer fires                                                         |
-| `chrome.windows.onFocusChanged` (window, source known)    | `aggregator.onWindowFocusChanged(windowId)` | cancel timer + `bundler.transition(source)` — seal + edge + open bundle                                                                           |
-| `chrome.windows.onFocusChanged` (window, source unknown)  | `aggregator.onWindowFocusChanged(windowId)` | cancel timer + start 200 ms off-browser timer (DevTools, extension popup, chrome:// page) — if captures arrive before timer fires, ingest handles it |
-| Content script `page:visibility` (hidden/visible)         | `aggregator.ingestSignal(...)`              | Ingested as `attention.visible` signal into the open bundle (no transition triggered)                                                              |
+| Chrome event / action                                    | Aggregator method                           | Bundler call                                                                                                                                         |
+| -------------------------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Capture arrives on port                                  | `aggregator.ingest(capture, tabId)`         | `bundler.ingest(stamped)` — stamps with `context@tabId`, may trigger `transition`                                                                    |
+| `chrome.tabs.onActivated` (source known, no timer)       | `aggregator.onTabActivated(tabId)`          | `bundler.transition(source)` — seal + edge + open bundle for new tab                                                                                 |
+| `chrome.tabs.onActivated` (source unknown, no timer)     | `aggregator.onTabActivated(tabId)`          | `bundler.seal()` — close current bundle, signals buffer until first capture establishes source                                                       |
+| `chrome.tabs.onActivated` (off-browser timer active)     | `aggregator.onTabActivated(tabId)`          | *skipped* — spurious Chrome event during focus loss, only `activeTabPerWindow` is updated                                                            |
+| `chrome.windows.onFocusChanged(WINDOW_ID_NONE)`          | `aggregator.onWindowFocusChanged(windowId)` | `bundler.seal()` + start 200 ms timer → `bundler.transition(OFF_BROWSER)` if timer fires                                                             |
+| `chrome.windows.onFocusChanged` (window, source known)   | `aggregator.onWindowFocusChanged(windowId)` | cancel timer + `bundler.transition(source)` — seal + edge + open bundle                                                                              |
+| `chrome.windows.onFocusChanged` (window, source unknown) | `aggregator.onWindowFocusChanged(windowId)` | cancel timer + start 200 ms off-browser timer (DevTools, extension popup, chrome:// page) — if captures arrive before timer fires, ingest handles it |
+| Content script `page:visibility` (hidden/visible)        | `aggregator.ingestSignal(...)`              | Ingested as `attention.visible` signal into the open bundle (no transition triggered)                                                                |
 
 ## Dev logs
 
@@ -231,10 +231,10 @@ State: sealed has 2 bundles, graph has 3 edges (root@42 → root@7, root@7 → o
 
 The aggregator (`index.ts`) maintains two maps to ensure signals are attributed to the correct source (buffering early signals until a tab's first capture establishes its identity):
 
-| Map              | Type                                           | Purpose                                                                                      |
-| ---------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `tabSources`     | `Map<string, string>`                          | `tabId → source` — populated when a capture arrives from a tab's content script               |
-| `pendingSignals` | `Map<string, {signal, tabId}[]>`               | Buffers signals for tabs whose source isn't known yet                                         |
+| Map              | Type                             | Purpose                                                                         |
+| ---------------- | -------------------------------- | ------------------------------------------------------------------------------- |
+| `tabSources`     | `Map<string, string>`            | `tabId → source` — populated when a capture arrives from a tab's content script |
+| `pendingSignals` | `Map<string, {signal, tabId}[]>` | Buffers signals for tabs whose source isn't known yet                           |
 
 ### Why signals need buffering
 
