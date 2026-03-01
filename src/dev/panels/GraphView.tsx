@@ -2,9 +2,11 @@ import {
     Boxes,
     Clipboard,
     Download,
-    Eclipse,
     Expand,
+    Eye,
+    EyeOff,
     GitGraph,
+    Hexagon,
     PanelRight,
     Rows3,
     Scan,
@@ -458,8 +460,10 @@ export function GraphView({ entries, onClear, onSend }: Props) {
     const [viewMode, setViewMode] = useState<"graph" | "edges">("graph");
     const [panelOpen, setPanelOpen] = useState(false);
     const [panelWidth, setPanelWidth] = useState(288);
-    const [dimMode, setDimMode] = useState(false);
-    const dimRef = useRef(false);
+    const [dimMode, setDimMode] = useState(true);
+    const dimRef = useRef(true);
+    const [showHulls, setShowHulls] = useState(true);
+    const showHullsRef = useRef(true);
     const [physicsOpen, setPhysicsOpen] = useState(false);
 
     const physicsRef = useRef({
@@ -843,7 +847,7 @@ export function GraphView({ entries, onClear, onSend }: Props) {
 
         // --- community hulls (grouped mode) ---
         const gr = groupedResultRef.current;
-        if (activeTabRef.current === "grouped" && gr) {
+        if (activeTabRef.current === "grouped" && gr && showHullsRef.current) {
             const uniqueCommunities = [
                 ...new Set(gr.louvain.communities.values()),
             ];
@@ -1769,9 +1773,7 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <Button
-                                        variant={
-                                            dimMode ? "default" : "outline"
-                                        }
+                                        variant="outline"
                                         size="icon-xs"
                                         onClick={() => {
                                             setDimMode((d) => {
@@ -1780,7 +1782,7 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                                             });
                                         }}
                                     >
-                                        <Eclipse />
+                                        {dimMode ? <EyeOff /> : <Eye />}
                                     </Button>
                                 </TooltipTrigger>
                                 <TooltipContent>
@@ -1789,6 +1791,35 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                                         : "Enable dim mode"}
                                 </TooltipContent>
                             </Tooltip>
+                            {activeTab === "grouped" && (
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button
+                                            variant="outline"
+                                            size="icon-xs"
+                                            onClick={() => {
+                                                setShowHulls((h) => {
+                                                    showHullsRef.current = !h;
+                                                    return !h;
+                                                });
+                                            }}
+                                        >
+                                            <Hexagon
+                                                className={
+                                                    showHulls
+                                                        ? ""
+                                                        : "opacity-40"
+                                                }
+                                            />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        {showHulls
+                                            ? "Hide community hulls"
+                                            : "Show community hulls"}
+                                    </TooltipContent>
+                                </Tooltip>
+                            )}
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <Button
