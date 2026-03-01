@@ -227,6 +227,22 @@ export interface FileContentPayload {
     length: number;
 }
 
+export interface OutlookNavigatePayload {
+    folder: string;
+    messageId: string | null;
+    previousContext: string;
+}
+
+export interface OutlookSendPayload {
+    mode: "compose" | "reply" | "forward";
+    draftId: string | null;
+}
+
+export interface OutlookDiscardPayload {
+    mode: "compose" | "reply" | "forward";
+    draftId: string | null;
+}
+
 // ── signals (service-worker-originated events) ─────────────────────
 
 interface BaseSignal<T extends string, P> {
@@ -278,7 +294,10 @@ export type Capture =
     | BaseCapture<"input.form_submit", InputFormSubmitPayload>
     // Adapter-specific
     | BaseCapture<"html.content", HTMLContentPayload>
-    | BaseCapture<"file.content", FileContentPayload>;
+    | BaseCapture<"file.content", FileContentPayload>
+    | BaseCapture<"outlook.navigate", OutlookNavigatePayload>
+    | BaseCapture<"outlook.send", OutlookSendPayload>
+    | BaseCapture<"outlook.discard", OutlookDiscardPayload>;
 
 // ── pipeline types ──────────────────────────────────────────────────
 

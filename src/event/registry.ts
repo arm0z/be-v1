@@ -9,16 +9,14 @@ import { tap } from "./tap.ts";
 /** Ordered list of Routes. First match wins. Last entry is the catch-all. */
 export const registry: Route[] = [
     {
-        match: (url) => /outlook\.(com|live\.com)/.test(url),
+        match: (url) =>
+            /outlook\.office\.com\/mail\//.test(url) ||
+            /outlook\.(com|live\.com)\/mail\//.test(url),
         build: () => relay(normalizer(outlookAdapter(tap()))),
     },
     {
         match: (url) => url.startsWith("file://"),
         build: () => relay(normalizer(fileAdapter(tap()))),
-    },
-    {
-        match: (url) => url.startsWith("https://outlook.office.com/mail/"),
-        build: () => relay(normalizer(tap())),
     },
     {
         // catch-all: generic web

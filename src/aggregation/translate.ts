@@ -96,6 +96,12 @@ function translateEntry(c: BundleEntry): string | null {
             return `page: "${c.payload.title}" - ${c.payload.text}`;
         case "file.content":
             return `file: ${truncate(c.payload.url, 40)} - ${c.payload.text}`;
+        case "outlook.navigate":
+            return `navigated to ${c.payload.folder}${c.payload.messageId ? ` (${truncate(c.payload.messageId, 20)})` : ""}`;
+        case "outlook.send":
+            return "Sent email";
+        case "outlook.discard":
+            return "Discarded draft";
 
         // ── signals ─────────────────────────────────────────────
         case "nav.completed":
