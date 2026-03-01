@@ -2,6 +2,8 @@ import { Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import type { DevChannel } from "@/event/dev";
 
 /**
@@ -84,23 +86,21 @@ const EVENT_GROUPS: { label: string; events: string[] }[] = [
         ],
     },
     {
-        label: "GRAPH",
-        events: ["edge.created", "edge.incremented", "url.updated"],
+        label: "PACKER",
+        events: [
+            "pack.preprocessed",
+            "pack.graph",
+            "pack.louvain",
+            "pack.flushed",
+        ],
     },
     {
-        label: "TRANSITIONS",
+        label: "VISIBILITY",
         events: [
             "tab.visible",
             "off_browser.start",
             "off_browser.cancel",
             "off_browser.commit",
-            "transition.start",
-            "pending.new",
-            "dwell.met",
-            "dwell.collapse",
-            "dwell.cancel",
-            "dwell.timer_start",
-            "dwell.auto_commit",
         ],
     },
 ];
@@ -173,12 +173,11 @@ export function FilterToggles({ filter, setEventFilter }: Props) {
             <div className="flex items-center gap-2">
                 <div className="relative flex-1">
                     <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                    <input
-                        type="text"
+                    <Input
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         placeholder="Search events…"
-                        className="h-8 w-full rounded-md border bg-transparent pl-8 pr-8 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        className="h-8 pl-8 pr-8"
                     />
                     {search && (
                         <Button
@@ -224,15 +223,13 @@ export function FilterToggles({ filter, setEventFilter }: Props) {
                                     <span className="font-mono text-muted-foreground">
                                         {event}
                                     </span>
-                                    <input
-                                        type="checkbox"
+                                    <Checkbox
                                         checked={enabled}
-                                        onChange={(e) =>
+                                        onCheckedChange={(checked) =>
                                             setEventFilter({
-                                                [event]: e.target.checked,
+                                                [event]: !!checked,
                                             })
                                         }
-                                        className="h-3.5 w-3.5 rounded border-muted-foreground accent-foreground"
                                     />
                                 </label>
                             );

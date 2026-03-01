@@ -299,7 +299,7 @@ if (import.meta.env.DEV) {
             normalizer: true,
             relay: true,
             aggregator: true,
-            graph: true,
+            packer: true,
             navigation: true,
             sync: true,
             persistence: true,

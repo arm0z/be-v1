@@ -16,9 +16,14 @@ import {
     X,
 } from "lucide-react";
 import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
     useCallback,
-    useEffect,
-    useRef,
     useState,
     type ReactElement,
 } from "react";
@@ -26,6 +31,7 @@ import { DevContext, useDevContext } from "./DevContext";
 import { GraphView } from "./panels/GraphView";
 import { LogStream } from "./panels/LogStream";
 import { StateInspector } from "./panels/StateInspector";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { useDevPort } from "./useDevPort";
 
 /* ── panel wrappers (consume shared state via context) ────────── */
@@ -92,27 +98,12 @@ let nextId = 0;
 
 /* ── header menu ──────────────────────────────────────────────── */
 
-const menuItemCls =
-    "flex w-full items-center gap-2 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800";
-
 function RightActions({
     api,
     containerApi,
     group,
 }: IDockviewHeaderActionsProps) {
-    const [open, setOpen] = useState(false);
     const [maximized, setMaximized] = useState(api.isMaximized());
-    const ref = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        if (!open) return;
-        const onDown = (e: MouseEvent) => {
-            if (ref.current && !ref.current.contains(e.target as Node))
-                setOpen(false);
-        };
-        document.addEventListener("mousedown", onDown);
-        return () => document.removeEventListener("mousedown", onDown);
-    }, [open]);
 
     const addPanel = (def: (typeof panelDefs)[number]) => {
         const id = `${def.type}-${++nextId}`;
@@ -124,7 +115,6 @@ function RightActions({
             params: { panelType: def.type },
             position: { referenceGroup: group },
         });
-        setOpen(false);
     };
 
     const toggleMaximize = () => {
@@ -145,38 +135,48 @@ function RightActions({
         "flex h-6 w-6 items-center justify-center rounded hover:bg-neutral-700";
 
     return (
-        <div ref={ref} className="relative flex items-center gap-0.5 pr-1">
-            <button
-                className={btnCls}
-                onClick={toggleMaximize}
-                title={maximized ? "Restore" : "Maximize"}
-            >
-                {maximized ? (
-                    <Minimize2 className="h-3.5 w-3.5 text-neutral-400" />
-                ) : (
-                    <Maximize2 className="h-3.5 w-3.5 text-neutral-400" />
-                )}
-            </button>
-            <button className={btnCls} onClick={popOut} title="Pop out">
-                <ExternalLink className="h-3.5 w-3.5 text-neutral-400" />
-            </button>
-            <button className={btnCls} onClick={() => setOpen((o) => !o)}>
-                <Menu className="h-3.5 w-3.5 text-neutral-400" />
-            </button>
-            {open && (
-                <div className="absolute right-0 top-full z-50 mt-1 min-w-36 rounded border border-neutral-700 bg-neutral-900 py-1 shadow-lg">
+        <div className="flex items-center gap-0.5 pr-1">
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <button
+                        className={btnCls}
+                        onClick={toggleMaximize}
+                    >
+                        {maximized ? (
+                            <Minimize2 className="h-3.5 w-3.5 text-neutral-400" />
+                        ) : (
+                            <Maximize2 className="h-3.5 w-3.5 text-neutral-400" />
+                        )}
+                    </button>
+                </TooltipTrigger>
+                <TooltipContent>{maximized ? "Restore" : "Maximize"}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <button className={btnCls} onClick={popOut}>
+                        <ExternalLink className="h-3.5 w-3.5 text-neutral-400" />
+                    </button>
+                </TooltipTrigger>
+                <TooltipContent>Pop out</TooltipContent>
+            </Tooltip>
+            <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <button className={btnCls}>
+                        <Menu className="h-3.5 w-3.5 text-neutral-400" />
+                    </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
                     {panelDefs.map((def) => (
-                        <button
+                        <DropdownMenuItem
                             key={def.type}
-                            className={menuItemCls}
                             onClick={() => addPanel(def)}
                         >
                             {iconMap[def.type]}
                             Add {def.title}
-                        </button>
+                        </DropdownMenuItem>
                     ))}
-                </div>
-            )}
+                </DropdownMenuContent>
+            </DropdownMenu>
         </div>
     );
 }
@@ -237,14 +237,16 @@ export default function App() {
     }, []);
 
     return (
-        <DevContext.Provider value={port}>
-            <DockviewReact
-                theme={neutralTheme}
-                components={components}
-                tabComponents={tabComponents}
-                rightHeaderActionsComponent={headerActions.right}
-                onReady={onReady}
-            />
-        </DevContext.Provider>
+        <TooltipProvider>
+            <DevContext.Provider value={port}>
+                <DockviewReact
+                    theme={neutralTheme}
+                    components={components}
+                    tabComponents={tabComponents}
+                    rightHeaderActionsComponent={headerActions.right}
+                    onReady={onReady}
+                />
+            </DevContext.Provider>
+        </TooltipProvider>
     );
 }

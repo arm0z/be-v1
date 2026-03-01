@@ -1,7 +1,6 @@
 import { ALL_EVENTS, FilterToggles } from "./FilterToggles";
 import {
     Check,
-    ChevronDown,
     ChevronRight,
     Copy,
     Pause,
@@ -11,11 +10,21 @@ import {
     Trash2,
     X,
 } from "lucide-react";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { DevChannel, DevEntry } from "@/event/dev";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 // ── Constants ────────────────────────────────────────────
@@ -26,7 +35,7 @@ const ALL_CHANNELS: DevChannel[] = [
     "normalizer",
     "relay",
     "aggregator",
-    "graph",
+    "packer",
     "navigation",
     "sync",
     "persistence",
@@ -38,7 +47,7 @@ const CHANNEL_CLASSES: Record<DevChannel, string> = {
     normalizer: "border-violet-500/50 bg-violet-500/10 text-violet-400",
     relay: "border-rose-500/50 bg-rose-500/10 text-rose-400",
     aggregator: "border-emerald-500/50 bg-emerald-500/10 text-emerald-400",
-    graph: "border-blue-500/50 bg-blue-500/10 text-blue-400",
+    packer: "border-blue-500/50 bg-blue-500/10 text-blue-400",
     navigation: "border-cyan-500/50 bg-cyan-500/10 text-cyan-400",
     sync: "border-orange-500/50 bg-orange-500/10 text-orange-400",
     persistence: "border-teal-500/50 bg-teal-500/10 text-teal-400",
@@ -97,15 +106,19 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
     );
 
     return (
-        <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={handleCopy}
-            className={cn("text-muted-foreground", className)}
-            title="Copy to clipboard"
-        >
-            {copied ? <Check className="text-emerald-400" /> : <Copy />}
-        </Button>
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={handleCopy}
+                    className={cn("text-muted-foreground", className)}
+                >
+                    {copied ? <Check className="text-emerald-400" /> : <Copy />}
+                </Button>
+            </TooltipTrigger>
+            <TooltipContent>Copy to clipboard</TooltipContent>
+        </Tooltip>
     );
 }
 
@@ -116,65 +129,42 @@ function EventFilterPopover({
     filter: DevFilter | null;
     setEventFilter: (events: Partial<Record<string, boolean>>) => void;
 }) {
-    const [open, setOpen] = useState(false);
-    const closeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-    const containerRef = useRef<HTMLDivElement>(null);
-
     const hiddenCount = useMemo(() => {
         if (!filter) return 0;
         return ALL_EVENTS.filter((e) => filter.events[e] === false).length;
     }, [filter]);
 
-    const handleEnter = useCallback(() => {
-        clearTimeout(closeTimer.current);
-        setOpen(true);
-    }, []);
-
-    const handleLeave = useCallback(() => {
-        closeTimer.current = setTimeout(() => setOpen(false), 200);
-    }, []);
-
-    useEffect(() => () => clearTimeout(closeTimer.current), []);
-
     return (
-        <div
-            ref={containerRef}
-            className="relative"
-            onMouseEnter={handleEnter}
-            onMouseLeave={handleLeave}
-        >
-            <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => setOpen((p) => !p)}
-                className={cn(
-                    "relative",
-                    open
-                        ? "bg-foreground/10 text-foreground"
-                        : "text-muted-foreground",
-                )}
-                title="Event filters"
-            >
-                <SlidersHorizontal />
-                Events
-                {hiddenCount > 0 && (
-                    <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold leading-none text-white">
-                        {hiddenCount}
-                    </span>
-                )}
-            </Button>
-
-            {open && (
-                <div className="absolute left-1/2 top-full z-50 mt-1 w-80 -translate-x-1/2 rounded-lg border bg-background p-4 shadow-lg">
-                    <div className="dev-scrollbar max-h-72 overflow-y-auto pr-1">
-                        <FilterToggles
-                            filter={filter}
-                            setEventFilter={setEventFilter}
-                        />
-                    </div>
+        <Popover>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <PopoverTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="xs"
+                            className="relative text-muted-foreground"
+                        >
+                            <SlidersHorizontal />
+                            Events
+                            {hiddenCount > 0 && (
+                                <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold leading-none text-white">
+                                    {hiddenCount}
+                                </span>
+                            )}
+                        </Button>
+                    </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent>Event filters</TooltipContent>
+            </Tooltip>
+            <PopoverContent className="w-80">
+                <div className="dev-scrollbar max-h-72 overflow-y-auto pr-1">
+                    <FilterToggles
+                        filter={filter}
+                        setEventFilter={setEventFilter}
+                    />
                 </div>
-            )}
-        </div>
+            </PopoverContent>
+        </Popover>
     );
 }
 
@@ -185,67 +175,45 @@ function formatEntryTitle(entry: DevEntry) {
 }
 
 function CopyDropdown({ filtered }: { filtered: DevEntry[] }) {
-    const [open, setOpen] = useState(false);
     const [feedback, setFeedback] = useState<string | null>(null);
-    const containerRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        if (!open) return;
-        function onClickOutside(e: MouseEvent) {
-            if (
-                containerRef.current &&
-                !containerRef.current.contains(e.target as Node)
-            ) {
-                setOpen(false);
-            }
-        }
-        document.addEventListener("mousedown", onClickOutside);
-        return () => document.removeEventListener("mousedown", onClickOutside);
-    }, [open]);
 
     const copy = useCallback(async (text: string, label: string) => {
         await navigator.clipboard.writeText(text);
-        setOpen(false);
         setFeedback(label);
         setTimeout(() => setFeedback(null), 1500);
     }, []);
 
     return (
-        <div ref={containerRef} className="relative">
-            <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => setOpen((p) => !p)}
-                className="text-muted-foreground"
-                title="More copy options"
-            >
-                {feedback ? (
-                    <Check className="text-emerald-400" />
-                ) : (
-                    <ChevronDown
-                        className={cn(
-                            "transition-transform",
-                            open && "rotate-180",
-                        )}
-                    />
-                )}
-            </Button>
-
-            {open && (
-                <div className="absolute right-0 top-full z-50 mt-1 min-w-40 rounded-lg border bg-background py-1 shadow-lg">
-                    <button
-                        type="button"
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                        onClick={() =>
-                            copy(JSON.stringify(filtered, null, 2), "detailed")
-                        }
-                    >
-                        <Copy className="h-3 w-3" />
-                        Copy Detailed
-                    </button>
-                </div>
-            )}
-        </div>
+        <DropdownMenu>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="text-muted-foreground"
+                        >
+                            {feedback ? (
+                                <Check className="text-emerald-400" />
+                            ) : (
+                                <Copy />
+                            )}
+                        </Button>
+                    </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent>More copy options</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                    onClick={() =>
+                        copy(JSON.stringify(filtered, null, 2), "detailed")
+                    }
+                >
+                    <Copy className="h-3 w-3" />
+                    Copy Detailed
+                </DropdownMenuItem>
+            </DropdownMenuContent>
+        </DropdownMenu>
     );
 }
 
@@ -284,12 +252,11 @@ function LogToolbar({
             {/* Search */}
             <div className="relative flex-1">
                 <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <input
-                    type="text"
+                <Input
                     value={search}
                     onChange={(e) => onSearchChange(e.target.value)}
                     placeholder="Filter logs…"
-                    className="h-8 w-full rounded-md border bg-transparent pl-8 pr-8 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    className="h-8 pl-8 pr-8"
                 />
                 {search && (
                     <Button
@@ -330,34 +297,42 @@ function LogToolbar({
             </span>
 
             {/* Copy titles */}
-            <Button
-                variant="ghost"
-                size="xs"
-                onClick={handleCopyTitles}
-                className="text-muted-foreground"
-                title="Copy log titles"
-            >
-                {copyFeedback ? (
-                    <Check className="text-emerald-400" />
-                ) : (
-                    <Copy />
-                )}
-                Copy
-            </Button>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        variant="ghost"
+                        size="xs"
+                        onClick={handleCopyTitles}
+                        className="text-muted-foreground"
+                    >
+                        {copyFeedback ? (
+                            <Check className="text-emerald-400" />
+                        ) : (
+                            <Copy />
+                        )}
+                        Copy
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent>Copy log titles</TooltipContent>
+            </Tooltip>
 
             {/* Copy options dropdown */}
             <CopyDropdown filtered={filtered} />
 
             {/* Clear */}
-            <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={onClear}
-                className="text-muted-foreground"
-                title="Clear all"
-            >
-                <Trash2 />
-            </Button>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={onClear}
+                        className="text-muted-foreground"
+                    >
+                        <Trash2 />
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent>Clear all</TooltipContent>
+            </Tooltip>
         </div>
     );
 }
@@ -371,30 +346,21 @@ function ChannelFilters({
     onToggle: (ch: DevChannel) => void;
     onToggleAll: () => void;
 }) {
-    const checkRef = useRef<HTMLInputElement>(null);
     const allSelected = activeChannels.size === ALL_CHANNELS.length;
     const noneSelected = activeChannels.size === 0;
 
-    useEffect(() => {
-        if (checkRef.current) {
-            checkRef.current.indeterminate = !allSelected && !noneSelected;
-        }
-    }, [allSelected, noneSelected]);
-
     return (
         <div className="flex flex-wrap items-center gap-1.5 border-b bg-background px-3 py-1.5">
-            <input
-                ref={checkRef}
-                type="checkbox"
-                checked={allSelected}
-                onChange={onToggleAll}
-                className="h-3.5 w-3.5 cursor-pointer rounded border-muted-foreground accent-foreground"
-                title={
-                    allSelected
-                        ? "Deselect all channels"
-                        : "Select all channels"
-                }
-            />
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Checkbox
+                        checked={allSelected ? true : noneSelected ? false : "indeterminate"}
+                        onCheckedChange={onToggleAll}
+                        className="cursor-pointer"
+                    />
+                </TooltipTrigger>
+                <TooltipContent>{allSelected ? "Deselect all channels" : "Select all channels"}</TooltipContent>
+            </Tooltip>
             {ALL_CHANNELS.map((ch) => (
                 <button key={ch} type="button" onClick={() => onToggle(ch)}>
                     <Badge

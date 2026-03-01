@@ -4,7 +4,7 @@ export type DevChannel =
     | "normalizer"
     | "relay"
     | "aggregator"
-    | "graph"
+    | "packer"
     | "navigation"
     | "sync"
     | "persistence";

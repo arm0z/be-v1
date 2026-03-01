@@ -1,15 +1,17 @@
 import {
     Braces,
+    ChevronDown,
+    ChevronUp,
     ChevronsDownUp,
     ChevronsUpDown,
+    ClipboardCheck,
     ClipboardCopy,
-    Code2,
-    Layers,
     LayoutList,
     Trash2,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useCallback, useState } from "react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useCallback, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import type { DevCaptureSummary } from "@/event/dev";
@@ -159,23 +161,23 @@ function JsonTreeView({ snapshot }: { snapshot: unknown }) {
 
     return (
         <div className="font-mono text-sm">
-            <div className="mb-3 flex items-center gap-1">
-                <button
-                    type="button"
+            <div className="mb-3 flex items-center justify-end gap-1">
+                <Button
+                    variant="ghost"
+                    size="xs"
                     onClick={expandAll}
-                    className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted/30 hover:text-foreground"
                 >
                     <ChevronsUpDown className="h-3 w-3" />
                     Expand all
-                </button>
-                <button
-                    type="button"
+                </Button>
+                <Button
+                    variant="ghost"
+                    size="xs"
                     onClick={collapseAll}
-                    className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted/30 hover:text-foreground"
                 >
                     <ChevronsDownUp className="h-3 w-3" />
                     Collapse all
-                </button>
+                </Button>
             </div>
             <JsonNode value={snapshot} reset={reset} />
         </div>
@@ -216,18 +218,29 @@ function CopyBundleButton({
 }) {
     const [copied, setCopied] = useState(false);
     return (
-        <button
-            type="button"
-            onClick={() => {
-                navigator.clipboard.writeText(bundleToMarkdown(bundle, index));
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-            }}
-            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted/30 hover:text-foreground"
-        >
-            <ClipboardCopy className="h-3 w-3" />
-            {copied ? "Copied" : "Copy"}
-        </button>
+        <Tooltip>
+            <TooltipTrigger asChild>
+                <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => {
+                        navigator.clipboard.writeText(
+                            bundleToMarkdown(bundle, index),
+                        );
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 1500);
+                    }}
+                    className="text-muted-foreground"
+                >
+                    {copied ? (
+                        <ClipboardCheck className="h-3.5 w-3.5" />
+                    ) : (
+                        <ClipboardCopy className="h-3.5 w-3.5" />
+                    )}
+                </Button>
+            </TooltipTrigger>
+            <TooltipContent>{copied ? "Copied" : "Copy"}</TooltipContent>
+        </Tooltip>
     );
 }
 
@@ -266,7 +279,38 @@ function CapturesList({ captures }: { captures: DevCaptureSummary[] }) {
 }
 
 function FormattedState({ snapshot }: { snapshot: DevStateSnapshot }) {
-    const [showText, setShowText] = useState(true);
+    // Track which bundles are collapsed by key
+    const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+    const allExpanded = useMemo(() => {
+        const withText = snapshot.sealedBundles.filter((b) => b.text);
+        return (
+            withText.length > 0 &&
+            withText.every((b) => !collapsed.has(`${b.source}-${b.startedAt}`))
+        );
+    }, [snapshot.sealedBundles, collapsed]);
+
+    const collapseAll = useCallback(() => {
+        setCollapsed(
+            new Set(
+                snapshot.sealedBundles
+                    .filter((b) => b.text)
+                    .map((b) => `${b.source}-${b.startedAt}`),
+            ),
+        );
+    }, [snapshot.sealedBundles]);
+
+    const expandAll = useCallback(() => {
+        setCollapsed(new Set());
+    }, []);
+
+    const toggleBundle = useCallback((key: string) => {
+        setCollapsed((prev) => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+        });
+    }, []);
 
     return (
         <div className="space-y-5">
@@ -323,64 +367,109 @@ function FormattedState({ snapshot }: { snapshot: DevStateSnapshot }) {
                         </span>
                     </h3>
                     {snapshot.sealedBundles.some((b) => b.text) && (
-                        <button
-                            type="button"
-                            onClick={() => setShowText((v) => !v)}
-                            className="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted/30 hover:text-foreground"
-                        >
-                            {showText ? (
-                                <ChevronsDownUp className="h-3 w-3" />
-                            ) : (
-                                <ChevronsUpDown className="h-3 w-3" />
-                            )}
-                            {showText ? "Collapse text" : "Expand text"}
-                        </button>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="xs"
+                                    onClick={
+                                        allExpanded ? collapseAll : expandAll
+                                    }
+                                >
+                                    {allExpanded ? (
+                                        <ChevronsDownUp className="h-3 w-3" />
+                                    ) : (
+                                        <ChevronsUpDown className="h-3 w-3" />
+                                    )}
+                                    {allExpanded
+                                        ? "Collapse all"
+                                        : "Expand all"}
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                {allExpanded
+                                    ? "Collapse all bundle text"
+                                    : "Expand all bundle text"}
+                            </TooltipContent>
+                        </Tooltip>
                     )}
                 </div>
                 {snapshot.sealedBundles.length === 0 ? (
                     <p className="text-sm text-muted-foreground/60">None</p>
                 ) : (
                     <div className="space-y-2">
-                        {snapshot.sealedBundles.map((b, i) => (
-                            <div
-                                key={`${b.source}-${b.startedAt}`}
-                                className="overflow-hidden rounded-md border"
-                            >
-                                <div className="flex items-center gap-3 bg-muted/20 px-4 py-2 text-sm">
-                                    <span className="text-muted-foreground">
-                                        #{i}
-                                    </span>
-                                    <SourceLabel source={b.source} />
-                                    <span className="ml-auto flex items-center gap-2 text-muted-foreground">
-                                        {b.captureCount} captures
-                                        <CopyBundleButton
-                                            bundle={b}
-                                            index={i}
-                                        />
-                                    </span>
-                                </div>
-                                <div className="space-y-1 border-t border-border/50 px-4 py-2">
-                                    <Row
-                                        label="Span"
-                                        value={`${formatTime(b.startedAt)} – ${b.endedAt ? formatTime(b.endedAt) : "..."}`}
-                                    />
-                                    {b.endedAt && (
-                                        <Row
-                                            label="Duration"
-                                            value={formatDuration(
-                                                b.endedAt - b.startedAt,
+                        {snapshot.sealedBundles.map((b, i) => {
+                            const key = `${b.source}-${b.startedAt}`;
+                            const isCollapsed = collapsed.has(key);
+                            return (
+                                <div
+                                    key={key}
+                                    className="overflow-hidden rounded-md border"
+                                >
+                                    <div className="flex items-center gap-3 bg-muted/20 px-4 py-2 text-sm">
+                                        <span className="text-muted-foreground">
+                                            #{i}
+                                        </span>
+                                        <SourceLabel source={b.source} />
+                                        <span className="ml-auto flex items-center gap-1 text-muted-foreground">
+                                            {b.captureCount} captures
+                                            <CopyBundleButton
+                                                bundle={b}
+                                                index={i}
+                                            />
+                                            {b.text && (
+                                                <Tooltip>
+                                                    <TooltipTrigger asChild>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() =>
+                                                                toggleBundle(
+                                                                    key,
+                                                                )
+                                                            }
+                                                            className="flex items-center rounded p-1 text-muted-foreground hover:bg-muted/30 hover:text-foreground"
+                                                        >
+                                                            {isCollapsed ? (
+                                                                <ChevronDown className="h-3.5 w-3.5" />
+                                                            ) : (
+                                                                <ChevronUp className="h-3.5 w-3.5" />
+                                                            )}
+                                                        </button>
+                                                    </TooltipTrigger>
+                                                    <TooltipContent>
+                                                        {isCollapsed
+                                                            ? "Expand text"
+                                                            : "Collapse text"}
+                                                    </TooltipContent>
+                                                </Tooltip>
                                             )}
+                                        </span>
+                                    </div>
+                                    <div className="space-y-1 border-t border-border/50 px-4 py-2">
+                                        <Row
+                                            label="Span"
+                                            value={`${formatTime(b.startedAt)} – ${b.endedAt ? formatTime(b.endedAt) : "..."}`}
                                         />
-                                    )}
-                                    <CapturesList captures={b.captures} />
-                                    {b.text && showText && (
-                                        <pre className="mt-2 whitespace-pre-wrap wrap-break-word rounded bg-muted/20 p-2 text-xs text-muted-foreground/80">
-                                            {b.text}
-                                        </pre>
-                                    )}
+                                        {b.endedAt && (
+                                            <Row
+                                                label="Duration"
+                                                value={formatDuration(
+                                                    b.endedAt - b.startedAt,
+                                                )}
+                                            />
+                                        )}
+                                        <CapturesList
+                                            captures={b.captures}
+                                        />
+                                        {b.text && !isCollapsed && (
+                                            <pre className="mt-2 whitespace-pre-wrap wrap-break-word rounded bg-muted/20 p-2 text-xs text-muted-foreground/80">
+                                                {b.text}
+                                            </pre>
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </section>
@@ -426,7 +515,6 @@ export function StateInspector({
     entries: DevEntry[];
     onClear?: () => void;
 }) {
-    const [view, setView] = useState("raw");
     const [format, setFormat] = useState("formatted");
 
     let snapshot: unknown = null;
@@ -439,52 +527,40 @@ export function StateInspector({
 
     return (
         <div className="flex h-full flex-col overflow-hidden">
-            <div className="flex shrink-0 items-center justify-between px-4 pt-3">
-                <Tabs value={view} onValueChange={setView}>
-                    <TabsList variant="line">
-                        <TabsTrigger value="raw">
-                            <Code2 className="h-3.5 w-3.5" />
-                            Raw
+            <div className="flex shrink-0 items-center justify-end gap-2 px-4 pt-3">
+                <Tabs value={format} onValueChange={setFormat}>
+                    <TabsList className="h-auto border border-border bg-popover/80 p-0.5 backdrop-blur-sm">
+                        <TabsTrigger
+                            value="formatted"
+                            className="h-auto px-2 py-0.5 text-xs"
+                        >
+                            <LayoutList className="size-3" />
+                            Formatted
                         </TabsTrigger>
-                        <TabsTrigger value="grouped">
-                            <Layers className="h-3.5 w-3.5" />
-                            Grouped
+                        <TabsTrigger
+                            value="json"
+                            className="h-auto px-2 py-0.5 text-xs"
+                        >
+                            <Braces className="size-3" />
+                            JSON
                         </TabsTrigger>
                     </TabsList>
                 </Tabs>
-                <div className="flex items-center gap-2">
-                    {view === "raw" && (
-                        <Tabs value={format} onValueChange={setFormat}>
-                            <TabsList className="h-auto border border-border bg-popover/80 p-0.5 backdrop-blur-sm">
-                                <TabsTrigger
-                                    value="formatted"
-                                    className="h-auto px-2 py-0.5 text-xs"
-                                >
-                                    <LayoutList className="size-3" />
-                                    Formatted
-                                </TabsTrigger>
-                                <TabsTrigger
-                                    value="json"
-                                    className="h-auto px-2 py-0.5 text-xs"
-                                >
-                                    <Braces className="size-3" />
-                                    JSON
-                                </TabsTrigger>
-                            </TabsList>
-                        </Tabs>
-                    )}
-                    {onClear && (
-                        <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            onClick={onClear}
-                            className="text-muted-foreground"
-                            title="Clear all"
-                        >
-                            <Trash2 />
-                        </Button>
-                    )}
-                </div>
+                {onClear && (
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                onClick={onClear}
+                                className="text-muted-foreground"
+                            >
+                                <Trash2 />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Clear all</TooltipContent>
+                    </Tooltip>
+                )}
             </div>
             <div className="dev-scrollbar min-h-0 flex-1 overflow-auto p-4">
                 {!snapshot && (
@@ -492,16 +568,11 @@ export function StateInspector({
                         No state snapshot received yet.
                     </p>
                 )}
-                {!!snapshot && view === "raw" && format === "json" && (
+                {!!snapshot && format === "json" && (
                     <JsonTreeView snapshot={snapshot} />
                 )}
-                {!!snapshot && view === "raw" && format === "formatted" && (
+                {!!snapshot && format === "formatted" && (
                     <FormattedState snapshot={snapshot as DevStateSnapshot} />
-                )}
-                {view === "grouped" && (
-                    <p className="text-sm text-muted-foreground">
-                        Not implemented yet.
-                    </p>
                 )}
             </div>
         </div>

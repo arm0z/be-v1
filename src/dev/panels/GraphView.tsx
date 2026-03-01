@@ -11,11 +11,14 @@ import {
 } from "lucide-react";
 import type { DirectedGraph, LouvainResult, PreprocessResult, Transition } from "@/aggregation/types";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { buildDirectedGraph, directedLouvain } from "@/aggregation/directed-louvain";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import type { DevEntry } from "@/event/dev";
+import { Separator } from "@/components/ui/separator";
+import { Slider } from "@/components/ui/slider";
 import { preprocess } from "@/aggregation/preprocess";
 
 type Props = { entries: DevEntry[]; onClear?: () => void };
@@ -125,6 +128,7 @@ export function GraphView({ entries, onClear }: Props) {
     const [hoverNodeId, setHoverNodeId] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<"raw" | "grouped">("raw");
     const [panelOpen, setPanelOpen] = useState(false);
+    const [panelWidth, setPanelWidth] = useState(288);
     const [dimMode, setDimMode] = useState(false);
     const dimRef = useRef(false);
     const [physicsOpen, setPhysicsOpen] = useState(false);
@@ -1031,62 +1035,68 @@ export function GraphView({ entries, onClear }: Props) {
                 </Tabs>
                 <div className="absolute right-2 top-2 flex gap-1">
                     {onClear && (
-                        <Button
-                            variant="outline"
-                            size="icon-xs"
-                            onClick={onClear}
-                            title="Clear all"
-                        >
-                            <Trash2 />
-                        </Button>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button variant="outline" size="icon-xs" onClick={onClear}>
+                                    <Trash2 />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Clear all</TooltipContent>
+                        </Tooltip>
                     )}
-                    <Button
-                        variant={physicsOpen ? "default" : "outline"}
-                        size="icon-xs"
-                        onClick={() => setPhysicsOpen((o) => !o)}
-                        title={
-                            physicsOpen ? "Close physics" : "Physics settings"
-                        }
-                    >
-                        <Settings2 />
-                    </Button>
-                    <Button
-                        variant={dimMode ? "default" : "outline"}
-                        size="icon-xs"
-                        onClick={() => {
-                            setDimMode((d) => {
-                                dimRef.current = !d;
-                                return !d;
-                            });
-                        }}
-                        title={dimMode ? "Enable dim mode" : "Disable dim mode"}
-                    >
-                        <Eclipse />
-                    </Button>
-                    <Button
-                        variant="outline"
-                        size="icon-xs"
-                        onClick={fitToView}
-                        title="Fit to view"
-                    >
-                        <Scan />
-                    </Button>
-                    <Button
-                        variant="outline"
-                        size="icon-xs"
-                        onClick={toggleFullscreen}
-                        title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-                    >
-                        {isFullscreen ? <Shrink /> : <Expand />}
-                    </Button>
-                    <Button
-                        variant="outline"
-                        size="icon-xs"
-                        onClick={() => setPanelOpen((o) => !o)}
-                        title={panelOpen ? "Close panel" : "Open panel"}
-                    >
-                        <PanelRight />
-                    </Button>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant={physicsOpen ? "default" : "outline"}
+                                size="icon-xs"
+                                onClick={() => setPhysicsOpen((o) => !o)}
+                            >
+                                <Settings2 />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{physicsOpen ? "Close physics" : "Physics settings"}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant={dimMode ? "default" : "outline"}
+                                size="icon-xs"
+                                onClick={() => {
+                                    setDimMode((d) => {
+                                        dimRef.current = !d;
+                                        return !d;
+                                    });
+                                }}
+                            >
+                                <Eclipse />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{dimMode ? "Disable dim mode" : "Enable dim mode"}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button variant="outline" size="icon-xs" onClick={fitToView}>
+                                <Scan />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Fit to view</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button variant="outline" size="icon-xs" onClick={toggleFullscreen}>
+                                {isFullscreen ? <Shrink /> : <Expand />}
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{isFullscreen ? "Exit fullscreen" : "Fullscreen"}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button variant="outline" size="icon-xs" onClick={() => setPanelOpen((o) => !o)}>
+                                <PanelRight />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{panelOpen ? "Close panel" : "Open panel"}</TooltipContent>
+                    </Tooltip>
                 </div>
                 {physicsOpen && (
                     <div className="absolute bottom-2 left-2 z-10 w-56 rounded-lg border border-border/50 bg-popover/95 p-3 text-xs text-popover-foreground shadow-xl backdrop-blur-sm">
@@ -1142,25 +1152,24 @@ export function GraphView({ entries, onClear }: Props) {
                                         {physics[p.key]}
                                     </span>
                                 </div>
-                                <input
-                                    type="range"
+                                <Slider
                                     min={p.min}
                                     max={p.max}
                                     step={p.step}
-                                    value={physics[p.key]}
-                                    onChange={(e) => {
-                                        const v = Number(e.target.value);
+                                    value={[physics[p.key]]}
+                                    onValueChange={([v]) => {
                                         physicsRef.current[p.key] = v;
                                         setPhysics({ ...physicsRef.current });
                                         awakeRef.current = true;
                                     }}
-                                    className="mt-0.5 h-1 w-full cursor-pointer appearance-none rounded bg-border accent-blue-500"
+                                    className="mt-1"
                                 />
                             </div>
                         ))}
-                        <button
-                            type="button"
-                            className="mt-3 w-full rounded border border-border/50 px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="mt-3 w-full"
                             onClick={() => {
                                 physicsRef.current = {
                                     chargeK: DEFAULT_CHARGE_K,
@@ -1174,12 +1183,31 @@ export function GraphView({ entries, onClear }: Props) {
                             }}
                         >
                             Reset defaults
-                        </button>
+                        </Button>
                     </div>
                 )}
             </div>
             {panelOpen && (
-                <div className="flex h-full w-72 shrink-0 flex-col border-l border-border bg-background">
+                <div className="relative flex h-full shrink-0 flex-col border-l border-border bg-background" style={{ width: panelWidth }}>
+                    {/* Resize handle */}
+                    <div
+                        className="absolute -left-1 top-0 z-20 h-full w-2 cursor-col-resize hover:bg-accent/50 active:bg-accent"
+                        onMouseDown={(e) => {
+                            e.preventDefault();
+                            const startX = e.clientX;
+                            const startWidth = panelWidth;
+                            const onMove = (ev: MouseEvent) => {
+                                const delta = startX - ev.clientX;
+                                setPanelWidth(Math.max(200, Math.min(600, startWidth + delta)));
+                            };
+                            const onUp = () => {
+                                document.removeEventListener("mousemove", onMove);
+                                document.removeEventListener("mouseup", onUp);
+                            };
+                            document.addEventListener("mousemove", onMove);
+                            document.addEventListener("mouseup", onUp);
+                        }}
+                    />
                     <div className="border-b border-border px-3 py-2">
                         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                             {activeTab === "grouped" ? "Algorithm Parameters" : "Graph Info"}
@@ -1226,7 +1254,7 @@ export function GraphView({ entries, onClear }: Props) {
                                         </div>
                                     </div>
                                 )}
-                                <div className="border-t border-border/50" />
+                                <Separator />
 
                                 {/* Louvain */}
                                 <div className="space-y-2">
@@ -1238,20 +1266,20 @@ export function GraphView({ entries, onClear }: Props) {
                                             <span>Resolution ({"\u03B3"})</span>
                                             <span className="tabular-nums">{resolution.toFixed(2)}</span>
                                         </div>
-                                        <input
-                                            type="range"
+                                        <Slider
                                             min={0.1} max={3.0} step={0.05}
-                                            value={resolution}
-                                            onChange={(e) => setResolution(Number(e.target.value))}
-                                            className="mt-0.5 h-1 w-full cursor-pointer appearance-none rounded bg-border accent-blue-500"
+                                            value={[resolution]}
+                                            onValueChange={([v]) => setResolution(v)}
+                                            className="mt-1"
                                         />
                                         <div className="flex justify-between text-muted-foreground text-[10px]">
                                             <span>0.1 (larger)</span>
                                             <span>3.0 (smaller)</span>
                                         </div>
+                                        <p className="mt-1 text-xs text-muted-foreground/60">Controls community granularity. Lower values merge more sources into fewer, larger groups. Higher values split into many smaller groups.</p>
                                     </div>
                                 </div>
-                                <div className="border-t border-border/50" />
+                                <Separator />
 
                                 {/* Off-browser */}
                                 <div className="space-y-2">
@@ -1263,29 +1291,29 @@ export function GraphView({ entries, onClear }: Props) {
                                             <span>Pass-through</span>
                                             <span className="tabular-nums">{(sentinelPassthroughMs / 1000).toFixed(1)}s</span>
                                         </div>
-                                        <input
-                                            type="range"
+                                        <Slider
                                             min={500} max={10000} step={500}
-                                            value={sentinelPassthroughMs}
-                                            onChange={(e) => setSentinelPassthroughMs(Number(e.target.value))}
-                                            className="mt-0.5 h-1 w-full cursor-pointer appearance-none rounded bg-border accent-blue-500"
+                                            value={[sentinelPassthroughMs]}
+                                            onValueChange={([v]) => setSentinelPassthroughMs(v)}
+                                            className="mt-1"
                                         />
+                                        <p className="mt-1 text-xs text-muted-foreground/60">Off-browser stints shorter than this are collapsed into a direct A{"\u2192"}B edge. Filters notification popups and accidental focus loss.</p>
                                     </div>
                                     <div>
                                         <div className="flex justify-between text-muted-foreground">
                                             <span>Break boundary</span>
                                             <span className="tabular-nums">{(sentinelBreakMs / 60000).toFixed(0)} min</span>
                                         </div>
-                                        <input
-                                            type="range"
+                                        <Slider
                                             min={60000} max={1800000} step={60000}
-                                            value={sentinelBreakMs}
-                                            onChange={(e) => setSentinelBreakMs(Number(e.target.value))}
-                                            className="mt-0.5 h-1 w-full cursor-pointer appearance-none rounded bg-border accent-blue-500"
+                                            value={[sentinelBreakMs]}
+                                            onValueChange={([v]) => setSentinelBreakMs(v)}
+                                            className="mt-1"
                                         />
+                                        <p className="mt-1 text-xs text-muted-foreground/60">Off-browser stints longer than this sever the graph link entirely. Treats long absences (lunch, meetings) as task boundaries.</p>
                                     </div>
                                 </div>
-                                <div className="border-t border-border/50" />
+                                <Separator />
 
                                 {/* Transient */}
                                 <div className="space-y-2">
@@ -1297,16 +1325,16 @@ export function GraphView({ entries, onClear }: Props) {
                                             <span>Dwell threshold</span>
                                             <span className="tabular-nums">{transientDwellMs}ms</span>
                                         </div>
-                                        <input
-                                            type="range"
+                                        <Slider
                                             min={100} max={2000} step={100}
-                                            value={transientDwellMs}
-                                            onChange={(e) => setTransientDwellMs(Number(e.target.value))}
-                                            className="mt-0.5 h-1 w-full cursor-pointer appearance-none rounded bg-border accent-blue-500"
+                                            value={[transientDwellMs]}
+                                            onValueChange={([v]) => setTransientDwellMs(v)}
+                                            className="mt-1"
                                         />
+                                        <p className="mt-1 text-xs text-muted-foreground/60">Sources where every visit was shorter than this are removed as transient. Filters rapid tab scanning (Ctrl+Tab).</p>
                                     </div>
                                 </div>
-                                <div className="border-t border-border/50" />
+                                <Separator />
 
                                 {/* Hub detection */}
                                 <div className="space-y-2">
@@ -1318,42 +1346,42 @@ export function GraphView({ entries, onClear }: Props) {
                                             <span>Threshold</span>
                                             <span className="tabular-nums">{(hubThreshold * 100).toFixed(0)}%</span>
                                         </div>
-                                        <input
-                                            type="range"
+                                        <Slider
                                             min={0.05} max={0.5} step={0.01}
-                                            value={hubThreshold}
-                                            onChange={(e) => setHubThreshold(Number(e.target.value))}
-                                            className="mt-0.5 h-1 w-full cursor-pointer appearance-none rounded bg-border accent-blue-500"
+                                            value={[hubThreshold]}
+                                            onValueChange={([v]) => setHubThreshold(v)}
+                                            className="mt-1"
                                         />
+                                        <p className="mt-1 text-xs text-muted-foreground/60">A source is a hub if its neighbor count exceeds this % of total sources. Hubs (e.g. email, Slack) are split into time chunks instead of dominating one community.</p>
                                     </div>
                                     <div>
                                         <div className="flex justify-between text-muted-foreground">
                                             <span>Min sources</span>
                                             <span className="tabular-nums">{hubMinSources}</span>
                                         </div>
-                                        <input
-                                            type="range"
+                                        <Slider
                                             min={3} max={30} step={1}
-                                            value={hubMinSources}
-                                            onChange={(e) => setHubMinSources(Number(e.target.value))}
-                                            className="mt-0.5 h-1 w-full cursor-pointer appearance-none rounded bg-border accent-blue-500"
+                                            value={[hubMinSources]}
+                                            onValueChange={([v]) => setHubMinSources(v)}
+                                            className="mt-1"
                                         />
+                                        <p className="mt-1 text-xs text-muted-foreground/60">Hub detection only activates when total unique sources reaches this count. Prevents false hub detection in small graphs.</p>
                                     </div>
                                     <div>
                                         <div className="flex justify-between text-muted-foreground">
                                             <span>Target per chunk</span>
                                             <span className="tabular-nums">{targetPerChunk}</span>
                                         </div>
-                                        <input
-                                            type="range"
+                                        <Slider
                                             min={2} max={10} step={1}
-                                            value={targetPerChunk}
-                                            onChange={(e) => setTargetPerChunk(Number(e.target.value))}
-                                            className="mt-0.5 h-1 w-full cursor-pointer appearance-none rounded bg-border accent-blue-500"
+                                            value={[targetPerChunk]}
+                                            onValueChange={([v]) => setTargetPerChunk(v)}
+                                            className="mt-1"
                                         />
+                                        <p className="mt-1 text-xs text-muted-foreground/60">Target transitions per hub chunk. Drives the dynamic window size — fewer means finer-grained time slicing of hub sources.</p>
                                     </div>
                                 </div>
-                                <div className="border-t border-border/50" />
+                                <Separator />
 
                                 {/* Per-community breakdown */}
                                 {groupedResult && (

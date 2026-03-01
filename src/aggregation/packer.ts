@@ -40,7 +40,7 @@ export function createPacker(aggregator: Aggregator): {
             createdAt: Date.now(),
         };
 
-        dev.log("aggregator", "pack.flushed", `packet ${packet.id}`, {
+        dev.log("packer", "pack.flushed", `packet ${packet.id}`, {
             groups: groups.length,
             bundles: bundles.length,
             edges: edges.length,
@@ -68,11 +68,47 @@ function partitionIntoGroups(
     // 1. Preprocess transitions
     const preprocessResult = preprocess(transitions);
 
+    dev.log(
+        "packer",
+        "pack.preprocessed",
+        `${transitions.length} → ${preprocessResult.transitions.length} transitions`,
+        {
+            raw: transitions.length,
+            filtered: preprocessResult.transitions.length,
+            sentinels: preprocessResult.sentinelCount,
+            excluded: [...preprocessResult.excludedSources],
+            hubs: [...preprocessResult.hubSources],
+            chunks: preprocessResult.chunkMap.size,
+        },
+    );
+
     // 2. Build directed graph from preprocessed transitions
     const graph = buildDirectedGraph(preprocessResult.transitions);
 
+    dev.log(
+        "packer",
+        "pack.graph",
+        `${graph.nodes.size} nodes, ${graph.edges.size} edges`,
+        {
+            nodes: graph.nodes.size,
+            edges: graph.edges.size,
+            totalWeight: graph.totalWeight,
+        },
+    );
+
     // 3. Run Louvain community detection
     const louvain = directedLouvain(graph);
+
+    dev.log(
+        "packer",
+        "pack.louvain",
+        `${new Set(louvain.communities.values()).size} communities (Q=${louvain.modularity.toFixed(4)})`,
+        {
+            communities: new Set(louvain.communities.values()).size,
+            modularity: louvain.modularity,
+            nodes: louvain.communities.size,
+        },
+    );
 
     // 4. Assign bundles to communities
     const bundleGroups = assignBundles(louvain, bundles, preprocessResult);
