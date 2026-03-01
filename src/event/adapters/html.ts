@@ -52,7 +52,7 @@ export const htmlAdapter: Adapter = (inner) => {
             }
 
             const text = extractDOM();
-            const hash = simpleHash(html);
+            const hash = fnv1a53(html);
             if (hash === lastHash) {
                 dev.log(
                     "adapter",
@@ -80,9 +80,11 @@ export const htmlAdapter: Adapter = (inner) => {
                         height: window.innerHeight,
                         scrollY: window.scrollY,
                         scrollPercent:
-                            document.documentElement.scrollHeight > 0
+                            document.documentElement.scrollHeight >
+                            window.innerHeight
                                 ? window.scrollY /
-                                  document.documentElement.scrollHeight
+                                  (document.documentElement.scrollHeight -
+                                      window.innerHeight)
                                 : 0,
                     },
                     html,
@@ -203,10 +205,18 @@ export const htmlAdapter: Adapter = (inner) => {
 
 // ── helpers ──────────────────────────────────────────────────────────
 
-function simpleHash(str: string): string {
-    let h = 0;
+/**
+ * 53-bit FNV-1a hash. Uses two 32-bit halves to stay within Number.MAX_SAFE_INTEGER,
+ * giving ~9 × 10^15 buckets instead of ~4 × 10^9 with a 32-bit hash.
+ */
+function fnv1a53(str: string): string {
+    let h1 = 0x811c9dc5;
+    let h2 = 0x27d4eb2d;
     for (let i = 0; i < str.length; i++) {
-        h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
+        const c = str.charCodeAt(i);
+        h1 = Math.imul(h1 ^ c, 0x01000193);
+        h2 = Math.imul(h2 ^ c, 0x01000193);
     }
-    return h.toString(36);
+    h1 = (Math.imul(h1, 0x01000193) ^ (h2 >>> 0)) >>> 0;
+    return ((h1 >>> 0) * 0x200000 + (h2 >>> 11)).toString(36);
 }

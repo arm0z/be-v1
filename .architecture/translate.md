@@ -76,17 +76,17 @@ Each capture type maps to a specific text format:
 
 #### Signal types (service-worker-originated)
 
-| Signal type             | Output format                                                                     | Truncation                     |
-| ----------------------- | --------------------------------------------------------------------------------- | ------------------------------ |
-| `nav.completed`         | `navigated to "title" (truncated-url…)`                                           | url: 40 chars end              |
-| `nav.spa`               | `navigated to "title" (truncated-url…)`                                           | url: 40 chars end              |
-| `nav.title_changed`     | `page title → "title"`                                                            | none                           |
-| `tab.created`           | `opened new tab: "title" (truncated-url…)`                                        | url: 40 chars end              |
-| `tab.closed`            | `closed tab`                                                                      | none                           |
-| `attention.active`      | `switched to tab: "title" (truncated-url…)`                                       | url: 40 chars end              |
-| `attention.visible`     | `browser gained focus` / `browser lost focus`                                     | none                           |
-| `media.audio`           | `audio started playing` / `audio stopped`                                         | none                           |
-| `media.download`        | `downloaded "filename" (state)`                                                   | none                           |
+| Signal type         | Output format                                 | Truncation        |
+| ------------------- | --------------------------------------------- | ----------------- |
+| `nav.completed`     | `navigated to "title" (truncated-url…)`       | url: 40 chars end |
+| `nav.spa`           | `navigated to "title" (truncated-url…)`       | url: 40 chars end |
+| `nav.title_changed` | `page title → "title"`                        | none              |
+| `tab.created`       | `opened new tab: "title" (truncated-url…)`    | url: 40 chars end |
+| `tab.closed`        | `closed tab`                                  | none              |
+| `attention.active`  | `switched to tab: "title" (truncated-url…)`   | url: 40 chars end |
+| `attention.visible` | `browser gained focus` / `browser lost focus` | none              |
+| `media.audio`       | `audio started playing` / `audio stopped`     | none              |
+| `media.download`    | `downloaded "filename" (state)`               | none              |
 
 Types not in these tables (`input.keystroke`, `input.composition`) return `null` and are silently skipped. These raw types are normally consumed by the normalizer before reaching the service worker, but the translator handles the edge case gracefully.
 

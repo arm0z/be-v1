@@ -10,13 +10,16 @@ import {
     Trash2,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useCallback, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import type { DevCaptureSummary } from "@/event/dev";
-import type { DevEntry } from "@/event/dev";
-import type { DevStateSnapshot } from "@/event/dev";
+import type { DevCaptureSummary, DevEntry, DevStateSnapshot } from "@/event/dev";
+import { writeClipboard } from "@/lib/utils";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -73,12 +76,6 @@ function JsonNode({
     const expandAll = reset % 2 === 1;
     const defaultOpen = expandAll || depth < 2;
     const [open, setOpen] = useState(defaultOpen);
-    // Re-sync when reset signal changes
-    const [prevReset, setPrevReset] = useState(reset);
-    if (reset !== prevReset) {
-        setPrevReset(reset);
-        setOpen(expandAll || depth < 2);
-    }
 
     if (!isObject) {
         return (
@@ -162,24 +159,16 @@ function JsonTreeView({ snapshot }: { snapshot: unknown }) {
     return (
         <div className="font-mono text-sm">
             <div className="mb-3 flex items-center justify-end gap-1">
-                <Button
-                    variant="ghost"
-                    size="xs"
-                    onClick={expandAll}
-                >
+                <Button variant="ghost" size="xs" onClick={expandAll}>
                     <ChevronsUpDown className="h-3 w-3" />
                     Expand all
                 </Button>
-                <Button
-                    variant="ghost"
-                    size="xs"
-                    onClick={collapseAll}
-                >
+                <Button variant="ghost" size="xs" onClick={collapseAll}>
                     <ChevronsDownUp className="h-3 w-3" />
                     Collapse all
                 </Button>
             </div>
-            <JsonNode value={snapshot} reset={reset} />
+            <JsonNode key={reset} value={snapshot} reset={reset} />
         </div>
     );
 }
@@ -223,12 +212,11 @@ function CopyBundleButton({
                 <Button
                     variant="ghost"
                     size="icon-xs"
-                    onClick={() => {
-                        navigator.clipboard.writeText(
-                            bundleToMarkdown(bundle, index),
-                        );
-                        setCopied(true);
-                        setTimeout(() => setCopied(false), 1500);
+                    onClick={async () => {
+                        if (await writeClipboard(bundleToMarkdown(bundle, index))) {
+                            setCopied(true);
+                            setTimeout(() => setCopied(false), 1500);
+                        }
                     }}
                     className="text-muted-foreground"
                 >
@@ -458,9 +446,7 @@ function FormattedState({ snapshot }: { snapshot: DevStateSnapshot }) {
                                                 )}
                                             />
                                         )}
-                                        <CapturesList
-                                            captures={b.captures}
-                                        />
+                                        <CapturesList captures={b.captures} />
                                         {b.text && !isCollapsed && (
                                             <pre className="mt-2 whitespace-pre-wrap wrap-break-word rounded bg-muted/20 p-2 text-xs text-muted-foreground/80">
                                                 {b.text}
@@ -517,13 +503,14 @@ export function StateInspector({
 }) {
     const [format, setFormat] = useState("formatted");
 
-    let snapshot: unknown = null;
-    for (let i = entries.length - 1; i >= 0; i--) {
-        if (entries[i].event === "state.snapshot") {
-            snapshot = entries[i].data;
-            break;
+    const snapshot = useMemo(() => {
+        for (let i = entries.length - 1; i >= 0; i--) {
+            if (entries[i].event === "state.snapshot") {
+                return entries[i].data;
+            }
         }
-    }
+        return null;
+    }, [entries]);
 
     return (
         <div className="flex h-full flex-col overflow-hidden">

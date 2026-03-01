@@ -7,7 +7,28 @@ export type DevChannel =
     | "packer"
     | "navigation"
     | "sync"
-    | "persistence";
+    | "checkpoint";
+
+export type DevCaptureSummary = { type: string; timestamp: number };
+
+export type DevStateSnapshot = {
+    activeSource: string | null;
+    openBundle: {
+        source: string;
+        startedAt: number;
+        captureCount: number;
+        captures: DevCaptureSummary[];
+    } | null;
+    sealedBundles: {
+        source: string;
+        startedAt: number;
+        endedAt: number | null;
+        captureCount: number;
+        text: string | null;
+        captures: DevCaptureSummary[];
+    }[];
+    transitions: { from: string; to: string; ts: number; dwellMs: number }[];
+};
 
 export type DevEntry = {
     channel: DevChannel;
@@ -16,6 +37,11 @@ export type DevEntry = {
     source?: string;
     message: string;
     data?: unknown;
+};
+
+export type DevFilter = {
+    channels: Record<DevChannel, boolean>;
+    events: Record<string, boolean>;
 };
 
 function createDevLog() {
@@ -44,26 +70,5 @@ function createDevLog() {
         chrome.runtime.sendMessage({ type: "dev:log", entry });
     };
 }
-
-export type DevCaptureSummary = { type: string; timestamp: number };
-
-export type DevStateSnapshot = {
-    activeSource: string | null;
-    openBundle: {
-        source: string;
-        startedAt: number;
-        captureCount: number;
-        captures: DevCaptureSummary[];
-    } | null;
-    sealedBundles: {
-        source: string;
-        startedAt: number;
-        endedAt: number | null;
-        captureCount: number;
-        text: string | null;
-        captures: DevCaptureSummary[];
-    }[];
-    transitions: { from: string; to: string; ts: number; dwellMs: number }[];
-};
 
 export const dev = { log: createDevLog() };

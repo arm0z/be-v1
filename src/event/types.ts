@@ -55,16 +55,6 @@ export interface TabClosedPayload {
     isWindowClosing: boolean;
 }
 
-export interface TabMovedPayload {
-    fromIndex: number;
-    toIndex: number;
-}
-
-export interface TabTransferredPayload {
-    fromWindowId: number;
-    toWindowId: number;
-}
-
 // Layer 2: Navigation
 
 export interface NavCompletedPayload {
@@ -85,24 +75,10 @@ export interface NavTitleChangedPayload {
 
 // Layer 3: Attention
 
-export interface AttentionActivePayload {
-    active: boolean;
-    url: string;
-    title: string;
-}
-
 export interface AttentionVisiblePayload {
     visible: boolean;
     url: string;
     title: string;
-}
-
-export interface AttentionMousePresencePayload {
-    present: boolean;
-}
-
-export interface AttentionIdlePayload {
-    state: "active" | "idle" | "locked";
 }
 
 // Layer 4: Keystrokes
@@ -266,7 +242,6 @@ export type Signal =
     | BaseSignal<"nav.title_changed", NavTitleChangedPayload>
     | BaseSignal<"tab.created", TabCreatedPayload>
     | BaseSignal<"tab.closed", TabClosedPayload>
-    | BaseSignal<"attention.active", AttentionActivePayload>
     | BaseSignal<"attention.visible", AttentionVisiblePayload>
     | BaseSignal<"media.audio", MediaAudioPayload>
     | BaseSignal<"media.download", MediaDownloadPayload>;
@@ -324,17 +299,12 @@ export type SessionEvent =
     | BaseEvent<"window.resized", WindowResizedPayload>
     | BaseEvent<"tab.created", TabCreatedPayload>
     | BaseEvent<"tab.closed", TabClosedPayload>
-    | BaseEvent<"tab.moved", TabMovedPayload>
-    | BaseEvent<"tab.transferred", TabTransferredPayload>
     // Layer 2: Navigation
     | BaseEvent<"nav.completed", NavCompletedPayload>
     | BaseEvent<"nav.spa", NavSpaPayload>
     | BaseEvent<"nav.title_changed", NavTitleChangedPayload>
     // Layer 3: Attention
-    | BaseEvent<"attention.active", AttentionActivePayload>
     | BaseEvent<"attention.visible", AttentionVisiblePayload>
-    | BaseEvent<"attention.mouse_presence", AttentionMousePresencePayload>
-    | BaseEvent<"attention.idle", AttentionIdlePayload>
     // Layer 4: Keystrokes
     | BaseEvent<"input.keystroke", InputKeystrokePayload>
     | BaseEvent<"input.keystroke_batch", InputKeystrokeBatchPayload>

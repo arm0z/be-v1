@@ -40,19 +40,18 @@ type ResolvedOptions = {
     maxChunkMs: number;
 };
 
-function resolveOptions(options?: PreprocessOptions): ResolvedOptions {
+function resolveOptions(opts?: PreprocessOptions): ResolvedOptions {
     return {
         sentinelPassthroughMs:
-            options?.sentinelPassthroughMs ?? SENTINEL_PASSTHROUGH_MS,
-        sentinelBreakMs: options?.sentinelBreakMs ?? SENTINEL_BREAK_MS,
-        transientDwellMs: options?.transientDwellMs ?? TRANSIENT_DWELL_MS,
-        transientChainMs: options?.transientChainMs ?? TRANSIENT_CHAIN_MS,
-        hubThresholdPercent:
-            options?.hubThresholdPercent ?? HUB_THRESHOLD_PERCENT,
-        hubMinSources: options?.hubMinSources ?? HUB_MIN_SOURCES,
-        targetPerChunk: options?.targetPerChunk ?? TARGET_PER_CHUNK,
-        minChunkMs: options?.minChunkMs ?? MIN_CHUNK_MS,
-        maxChunkMs: options?.maxChunkMs ?? MAX_CHUNK_MS,
+            opts?.sentinelPassthroughMs ?? SENTINEL_PASSTHROUGH_MS,
+        sentinelBreakMs: opts?.sentinelBreakMs ?? SENTINEL_BREAK_MS,
+        transientDwellMs: opts?.transientDwellMs ?? TRANSIENT_DWELL_MS,
+        transientChainMs: opts?.transientChainMs ?? TRANSIENT_CHAIN_MS,
+        hubThresholdPercent: opts?.hubThresholdPercent ?? HUB_THRESHOLD_PERCENT,
+        hubMinSources: opts?.hubMinSources ?? HUB_MIN_SOURCES,
+        targetPerChunk: opts?.targetPerChunk ?? TARGET_PER_CHUNK,
+        minChunkMs: opts?.minChunkMs ?? MIN_CHUNK_MS,
+        maxChunkMs: opts?.maxChunkMs ?? MAX_CHUNK_MS,
     };
 }
 

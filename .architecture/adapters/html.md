@@ -36,11 +36,11 @@ The accumulator resets when a snapshot is scheduled, preventing rapid-fire captu
 
 A `MutationObserver` on `document.body` with `{ childList: true, subtree: true }`. Only **significant** added nodes trigger a snapshot. A node is significant if any of these are true:
 
-| Check | Condition |
-|-------|-----------|
-| ARIA dialog | `role="dialog"`, `role="alertdialog"`, or `role="alert"` |
-| Modal | `aria-modal="true"` |
-| Fixed overlay | `position: fixed` with `innerText` > 20 chars |
+| Check            | Condition                                                     |
+| ---------------- | ------------------------------------------------------------- |
+| ARIA dialog      | `role="dialog"`, `role="alertdialog"`, or `role="alert"`      |
+| Modal            | `aria-modal="true"`                                           |
+| Fixed overlay    | `position: fixed` with `innerText` > 20 chars                 |
 | Viewport content | Bounding rect intersects viewport and `innerText` >= 50 chars |
 
 Only the added node itself is checked (not its descendants) — `innerText` already includes child text.
@@ -49,7 +49,7 @@ An extra 300 ms settle timer runs before entering the debounce, preventing prema
 
 ## Debounce and cooldown
 
-```
+```text
 trigger event
     │
     ▼
@@ -63,15 +63,15 @@ takeSnapshot(trigger)
     └─ emit capture to sink
 ```
 
-| Constant | Value | Purpose |
-|----------|-------|---------|
-| `DEBOUNCE_MS` | 500 | Schedule-to-snapshot delay |
-| `COOLDOWN_MS` | 2,000 | Minimum time between emitted snapshots |
-| `SETTLE_MS` | 300 | Mutation settle before entering debounce |
-| `SCROLL_THRESHOLD` | 0.5 | 50% viewport height scroll distance gate |
-| `SCROLL_IDLE_MS` | 150 | Scroll-end detection window |
-| `CONTENT_BUDGET` | 65,536 | Byte cap for raw `outerHTML` |
-| `MUTATION_TEXT_MIN` | 50 | Minimum `innerText` length for viewport mutation nodes |
+| Constant            | Value  | Purpose                                                |
+| ------------------- | ------ | ------------------------------------------------------ |
+| `DEBOUNCE_MS`       | 500    | Schedule-to-snapshot delay                             |
+| `COOLDOWN_MS`       | 2,000  | Minimum time between emitted snapshots                 |
+| `SETTLE_MS`         | 300    | Mutation settle before entering debounce               |
+| `SCROLL_THRESHOLD`  | 0.5    | 50% viewport height scroll distance gate               |
+| `SCROLL_IDLE_MS`    | 150    | Scroll-end detection window                            |
+| `CONTENT_BUDGET`    | 65,536 | Byte cap for raw `outerHTML`                           |
+| `MUTATION_TEXT_MIN` | 50     | Minimum `innerText` length for viewport mutation nodes |
 
 ## DOM extractor (`extract/dom.ts`)
 
@@ -88,12 +88,12 @@ Produces the `text` field — a Firecrawl-inspired markdown conversion using Tur
 
 ### Turndown rules
 
-| Rule | Behavior |
-|------|----------|
-| `strip-img` | Replaces `<img>` with `<src>` (token savings) |
-| `truncate-urls` | Truncates link `href` to 40 chars |
-| `strip-embed` | Removes `<svg>`, `<canvas>`, `<iframe>` |
-| `form-inputs` | Renders `<input>`, `<select>`, `<textarea>` as bracket annotations with type/placeholder/value (sensitive fields redacted via shared `isSensitiveField`) |
+| Rule            | Behavior                                                                                                                                                 |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `strip-img`     | Replaces `<img>` with `<src>` (token savings)                                                                                                            |
+| `truncate-urls` | Truncates link `href` to 40 chars                                                                                                                        |
+| `strip-embed`   | Removes `<svg>`, `<canvas>`, `<iframe>`                                                                                                                  |
+| `form-inputs`   | Renders `<input>`, `<select>`, `<textarea>` as bracket annotations with type/placeholder/value (sensitive fields redacted via shared `isSensitiveField`) |
 
 ## Emitted event
 
@@ -127,12 +127,12 @@ Produces the `text` field — a Firecrawl-inspired markdown conversion using Tur
 
 ## File map
 
-| File | Role |
-|------|------|
-| `src/event/adapters/html.ts` | Adapter — triggers, debounce, cooldown, hash dedup |
-| `src/event/extract/dom.ts` | DOM extractor — clone, prune, strip, Turndown conversion |
-| `src/event/dom-utils.ts` | Shared `isSensitiveField` (used by both `tap.ts` and the extractor) |
-| `src/event/types.ts` | `HTMLContentPayload` type definition |
+| File                         | Role                                                                |
+| ---------------------------- | ------------------------------------------------------------------- |
+| `src/event/adapters/html.ts` | Adapter — triggers, debounce, cooldown, hash dedup                  |
+| `src/event/extract/dom.ts`   | DOM extractor — clone, prune, strip, Turndown conversion            |
+| `src/event/dom-utils.ts`     | Shared `isSensitiveField` (used by both `tap.ts` and the extractor) |
+| `src/event/types.ts`         | `HTMLContentPayload` type definition                                |
 
 ## Dev panel verification
 

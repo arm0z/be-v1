@@ -17,7 +17,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import type { DevChannel, DevEntry } from "@/event/dev";
+import type { DevChannel, DevEntry, DevFilter } from "@/event/dev";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
+import { cn, writeClipboard } from "@/lib/utils";
 
 // ── Constants ────────────────────────────────────────────
 
@@ -38,7 +38,7 @@ const ALL_CHANNELS: DevChannel[] = [
     "packer",
     "navigation",
     "sync",
-    "persistence",
+    "checkpoint",
 ];
 
 const CHANNEL_CLASSES: Record<DevChannel, string> = {
@@ -50,18 +50,14 @@ const CHANNEL_CLASSES: Record<DevChannel, string> = {
     packer: "border-blue-500/50 bg-blue-500/10 text-blue-400",
     navigation: "border-cyan-500/50 bg-cyan-500/10 text-cyan-400",
     sync: "border-orange-500/50 bg-orange-500/10 text-orange-400",
-    persistence: "border-teal-500/50 bg-teal-500/10 text-teal-400",
+    checkpoint: "border-teal-500/50 bg-teal-500/10 text-teal-400",
 };
 
 // ── Helpers ──────────────────────────────────────────────
 
 type LogGroup = {
+    key: string;
     entries: DevEntry[];
-};
-
-type DevFilter = {
-    channels: Record<DevChannel, boolean>;
-    events: Record<string, boolean>;
 };
 
 function formatTimestamp(ts: number) {
@@ -84,7 +80,8 @@ function groupConsecutive(entries: DevEntry[]): LogGroup[] {
         ) {
             last.entries.push(entry);
         } else {
-            groups.push({ entries: [entry] });
+            const key = `${entry.channel}:${entry.event ?? ""}:${entry.timestamp}`;
+            groups.push({ key, entries: [entry] });
         }
     }
     return groups;
@@ -98,9 +95,10 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
     const handleCopy = useCallback(
         async (e: React.MouseEvent) => {
             e.stopPropagation();
-            await navigator.clipboard.writeText(text);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
+            if (await writeClipboard(text)) {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+            }
         },
         [text],
     );
@@ -178,9 +176,10 @@ function CopyDropdown({ filtered }: { filtered: DevEntry[] }) {
     const [feedback, setFeedback] = useState<string | null>(null);
 
     const copy = useCallback(async (text: string, label: string) => {
-        await navigator.clipboard.writeText(text);
-        setFeedback(label);
-        setTimeout(() => setFeedback(null), 1500);
+        if (await writeClipboard(text)) {
+            setFeedback(label);
+            setTimeout(() => setFeedback(null), 1500);
+        }
     }, []);
 
     return (
@@ -240,11 +239,12 @@ function LogToolbar({
 }) {
     const [copyFeedback, setCopyFeedback] = useState(false);
 
-    const handleCopyTitles = useCallback(() => {
+    const handleCopyTitles = useCallback(async () => {
         const titles = filtered.map(formatEntryTitle).join("\n");
-        navigator.clipboard.writeText(titles);
-        setCopyFeedback(true);
-        setTimeout(() => setCopyFeedback(false), 1500);
+        if (await writeClipboard(titles)) {
+            setCopyFeedback(true);
+            setTimeout(() => setCopyFeedback(false), 1500);
+        }
     }, [filtered]);
 
     return (
@@ -549,15 +549,19 @@ function CollapsedGroupRow({
 type Props = {
     entries: DevEntry[];
     filter: DevFilter | null;
+    setChannelFilter: (channels: Partial<Record<DevChannel, boolean>>) => void;
     setEventFilter: (events: Partial<Record<string, boolean>>) => void;
 };
 
-export function LogStream({ entries, filter, setEventFilter }: Props) {
+export function LogStream({ entries, filter, setChannelFilter, setEventFilter }: Props) {
     const [search, setSearch] = useState("");
-    const [activeChannels, setActiveChannels] = useState<Set<DevChannel>>(
-        () => new Set(ALL_CHANNELS),
-    );
-    const [expandedIndices, setExpandedIndices] = useState<Set<number>>(
+
+    const activeChannels = useMemo(() => {
+        if (!filter) return new Set(ALL_CHANNELS);
+        return new Set(ALL_CHANNELS.filter(ch => filter.channels[ch] !== false));
+    }, [filter]);
+
+    const [expandedKeys, setExpandedKeys] = useState<Set<string>>(
         () => new Set(),
     );
     const [paused, setPaused] = useState(false);
@@ -583,30 +587,30 @@ export function LogStream({ entries, filter, setEventFilter }: Props) {
 
     const handleClear = useCallback(() => {
         setClearedAt(Date.now());
-        setExpandedIndices(new Set());
+        setExpandedKeys(new Set());
     }, []);
 
     const toggleChannel = useCallback((ch: DevChannel) => {
-        setActiveChannels((prev) => {
-            const next = new Set(prev);
-            if (next.has(ch)) next.delete(ch);
-            else next.add(ch);
-            return next;
-        });
-    }, []);
+        setChannelFilter({ [ch]: !activeChannels.has(ch) });
+    }, [activeChannels, setChannelFilter]);
 
     const toggleAllChannels = useCallback(() => {
-        setActiveChannels((prev) => {
-            if (prev.size === ALL_CHANNELS.length) return new Set();
-            return new Set(ALL_CHANNELS);
-        });
-    }, []);
+        if (activeChannels.size === ALL_CHANNELS.length) {
+            const patch: Partial<Record<DevChannel, boolean>> = {};
+            for (const ch of ALL_CHANNELS) patch[ch] = false;
+            setChannelFilter(patch);
+        } else {
+            const patch: Partial<Record<DevChannel, boolean>> = {};
+            for (const ch of ALL_CHANNELS) patch[ch] = true;
+            setChannelFilter(patch);
+        }
+    }, [activeChannels, setChannelFilter]);
 
-    const toggleExpand = useCallback((index: number) => {
-        setExpandedIndices((prev) => {
+    const toggleExpand = useCallback((key: string) => {
+        setExpandedKeys((prev) => {
             const next = new Set(prev);
-            if (next.has(index)) next.delete(index);
-            else next.add(index);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
             return next;
         });
     }, []);
@@ -687,20 +691,20 @@ export function LogStream({ entries, filter, setEventFilter }: Props) {
                     </p>
                 ) : (
                     <div className="divide-y pb-16">
-                        {groups.map((group, i) =>
+                        {groups.map((group) =>
                             group.entries.length === 1 ? (
                                 <SingleEntryRow
-                                    key={`${group.entries[0].timestamp}-${i}`}
+                                    key={group.key}
                                     entry={group.entries[0]}
-                                    expanded={expandedIndices.has(i)}
-                                    onToggle={() => toggleExpand(i)}
+                                    expanded={expandedKeys.has(group.key)}
+                                    onToggle={() => toggleExpand(group.key)}
                                 />
                             ) : (
                                 <CollapsedGroupRow
-                                    key={`${group.entries[0].timestamp}-${i}`}
+                                    key={group.key}
                                     group={group}
-                                    expanded={expandedIndices.has(i)}
-                                    onToggle={() => toggleExpand(i)}
+                                    expanded={expandedKeys.has(group.key)}
+                                    onToggle={() => toggleExpand(group.key)}
                                 />
                             ),
                         )}
