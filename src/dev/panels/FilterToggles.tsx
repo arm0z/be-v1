@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import type { DevChannel } from "@/event/dev";
 import { Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -87,7 +88,7 @@ const EVENT_GROUPS: { label: string; events: string[] }[] = [
 	},
 ];
 
-const ALL_EVENTS = EVENT_GROUPS.flatMap((g) => g.events);
+export const ALL_EVENTS = EVENT_GROUPS.flatMap((g) => g.events);
 
 type DevFilter = {
 	channels: Record<DevChannel, boolean>;
@@ -104,23 +105,27 @@ export function FilterToggles({ filter, setEventFilter }: Props) {
 
 	const q = search.toLowerCase();
 
-	const matchedEvents = useMemo(
+	const filteredGroups = useMemo(
 		() =>
 			q
-				? ALL_EVENTS.filter((e) => e.toLowerCase().includes(q))
-				: ALL_EVENTS,
+				? EVENT_GROUPS.map((group) => {
+						const labelMatch = group.label.toLowerCase().includes(q);
+						return {
+							...group,
+							events: labelMatch
+								? group.events
+								: group.events.filter((e) =>
+										e.toLowerCase().includes(q),
+									),
+						};
+					}).filter((g) => g.events.length > 0)
+				: EVENT_GROUPS,
 		[q],
 	);
 
-	const filteredGroups = useMemo(
-		() =>
-			EVENT_GROUPS.map((group) => ({
-				...group,
-				events: group.events.filter((e) =>
-					e.toLowerCase().includes(q),
-				),
-			})).filter((g) => g.events.length > 0),
-		[q],
+	const matchedEvents = useMemo(
+		() => filteredGroups.flatMap((g) => g.events),
+		[filteredGroups],
 	);
 
 	if (!filter) {
@@ -161,19 +166,21 @@ export function FilterToggles({ filter, setEventFilter }: Props) {
 						className="h-8 w-full rounded-md border bg-transparent pl-8 pr-8 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
 					/>
 					{search && (
-						<button
-							type="button"
+						<Button
+							variant="ghost"
+							size="icon-xs"
 							onClick={() => setSearch("")}
-							className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+							className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground"
 						>
-							<X className="h-3.5 w-3.5" />
-						</button>
+							<X />
+						</Button>
 					)}
 				</div>
-				<button
-					type="button"
+				<Button
+					variant="outline"
+					size="xs"
 					onClick={allMatchedOn ? deselectAll : selectAll}
-					className="shrink-0 rounded-md border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+					className="text-muted-foreground"
 				>
 					{q
 						? allMatchedOn
@@ -182,7 +189,7 @@ export function FilterToggles({ filter, setEventFilter }: Props) {
 						: allMatchedOn
 							? "Deselect all"
 							: "Select all"}
-				</button>
+				</Button>
 			</div>
 
 			{/* Event groups */}

@@ -44,4 +44,14 @@ function createDevLog() {
     };
 }
 
+export type DevCaptureSummary = { type: string; timestamp: number };
+
+export type DevStateSnapshot = {
+    activeSource: string | null;
+    openBundle: { source: string; startedAt: number; captureCount: number; captures: DevCaptureSummary[] } | null;
+    sealedBundles: { source: string; startedAt: number; endedAt: number | null; captureCount: number; text: string | null; captures: DevCaptureSummary[] }[];
+    edges: { from: string; to: string; weight: number }[];
+    urls: Record<string, string>;
+};
+
 export const dev = { log: createDevLog() };

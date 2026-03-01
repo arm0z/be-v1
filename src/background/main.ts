@@ -5,6 +5,18 @@ import { createAggregator } from "../aggregation/index.ts";
 
 const aggregator = createAggregator();
 
+// Seed activeTabPerWindow for windows that already exist
+chrome.windows.getAll({ populate: false }, (windows) => {
+    for (const w of windows) {
+        if (w.id === undefined) continue;
+        chrome.tabs.query({ active: true, windowId: w.id }, (tabs) => {
+            if (tabs[0]?.id !== undefined) {
+                aggregator.onTabActivated(String(tabs[0].id), w.id!);
+            }
+        });
+    }
+});
+
 // ── Receive Captures from the Event Layer (port-based) ──────
 
 chrome.runtime.onConnect.addListener((port) => {
@@ -159,7 +171,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 // ── Layer 3: Attention ──────────────────────────────────────
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
-    aggregator.onTabActivated();
+    aggregator.onTabActivated(String(activeInfo.tabId), activeInfo.windowId);
     chrome.tabs.get(activeInfo.tabId, (tab) => {
         dev.log("tap", "attention.active", "tab activated", {
             active: true,
@@ -203,6 +215,23 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
 
 chrome.idle.onStateChanged.addListener((state) => {
     dev.log("tap", "attention.idle", `idle state: ${state}`, { state });
+});
+
+// ── Content-script visibility (Page Visibility API) ─────────
+
+chrome.runtime.onMessage.addListener((msg, sender) => {
+    if (msg.type !== "page:visibility") return;
+    const tabId = String(sender.tab?.id ?? "unknown");
+    dev.log("tap", "attention.visible", msg.visible ? "page became visible" : "page became hidden", {
+        visible: msg.visible,
+        url: msg.url ?? "",
+        title: msg.title ?? "",
+        tabId,
+    });
+    aggregator.ingestSignal(
+        { type: "attention.visible", timestamp: Date.now(), payload: { visible: msg.visible, url: msg.url ?? "", title: msg.title ?? "" } },
+        tabId,
+    );
 });
 
 // ── Layer 9: Media & Downloads ──────────────────────────────

@@ -57,3 +57,21 @@
 		color: var(--color-foreground);
 	}
 }
+
+.dev-scrollbar {
+	scrollbar-width: thin;
+	scrollbar-color: var(--color-muted-foreground) transparent;
+}
+.dev-scrollbar::-webkit-scrollbar {
+	width: 6px;
+}
+.dev-scrollbar::-webkit-scrollbar-track {
+	background: transparent;
+}
+.dev-scrollbar::-webkit-scrollbar-thumb {
+	background: var(--color-border);
+	border-radius: 3px;
+}
+.dev-scrollbar::-webkit-scrollbar-thumb:hover {
+	background: var(--color-muted-foreground);
+}

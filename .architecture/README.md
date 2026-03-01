@@ -47,10 +47,11 @@ Lifecycle:
 | [`src/event/adapters/file.ts`](../src/event/adapters/file.ts)       | File Adapter. Exports `FILE_CONTENT` const and `FileContentPayload`. Categorizes files by extension (text, markup, image, audio, video, pdf, binary), extracts text content (including PDF via `pdfjs-dist`), truncates at 65 KB, and emits a `file.content` Capture on pipeline start.                                                                                                                                                                                                                                                                                                                               |
 | [`src/event/normalizer.ts`](../src/event/normalizer.ts)             | Composable normalizer factory. Normalizers **consume** the events they handle — raw events never pass through to the Relay. Four individual normalizers: `keystrokeNormalizer` (consumes `input.keystroke` and `input.composition`, batches printable keys into `input.keystroke_batch` after 1 s idle), `scrollNormalizer` (debounces `input.scroll` at 150 ms), `selectionNormalizer` (debounces `input.selection` at 300 ms, drops empty), `formFocusNormalizer` (strips form snapshot on rapid re-focus within same form). `normalizerFactory(opts)` composes them; `normalizer` is the default with all enabled. |
 | [`src/event/relay.ts`](../src/event/relay.ts)                       | Terminal Relay. Forwards every Capture to the service worker via a persistent `chrome.runtime.connect({ name: "capture" })` port.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| [`src/event/visibility.ts`](../src/event/visibility.ts)             | Page Visibility API tracker. Runs in every content script (outside the pipeline). Listens for `visibilitychange` and `pageshow` (bfcache). Sends `{ type: "page:visibility", visible, url, title }` to the service worker via `chrome.runtime.sendMessage`. Deduplicates with `lastState` tracking. Reports initial state on load.                                                                                                                                                                                                                                                                                    |
 | [`src/event/registry.ts`](../src/event/registry.ts)                 | Route registry. Ordered list of `Route` objects — Outlook, file://, and a catch-all generic web pipeline. First match wins.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | [`src/event/spa-observer.ts`](../src/event/spa-observer.ts)         | SPA navigation observer. Monkey-patches `history.pushState`/`replaceState` and listens for `popstate` to detect client-side route changes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | [`src/event/dev.ts`](../src/event/dev.ts)                           | Dev logging utility. Structured `dev.log(channel, event, message, data)` — no-op in production (tree-shaken out), sends `{ type: "dev:log", entry }` to service worker in dev mode.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| [`src/content/main.ts`](../src/content/main.ts)                     | Content script bootstrap. Entry point injected on `<all_urls>`. Reads the URL, matches against the registry, builds the pipeline, and installs the SPA observer if needed.                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| [`src/content/main.ts`](../src/content/main.ts)                     | Content script bootstrap. Entry point injected on `<all_urls>`. Calls `setupVisibility()` first (runs on every tab regardless of route), then matches the URL against the registry, builds the pipeline, and installs the SPA observer if needed.                                                                                                                                                                                                                                                                                                                                                                     |
 | [`src/background/main.ts`](../src/background/main.ts)               | Service worker. Receives Captures via `chrome.runtime.onConnect` port (`name: "capture"`), logs with source/tabId. Listens to Chrome APIs for session, navigation, attention, and media events. In dev mode, runs the **DevHub**: receives `dev:log` messages from content scripts, overrides `dev.log` to call `receive()` directly (no sendMessage round-trip), filters by channel/event, stores in 10k-entry ring buffer, broadcasts to connected dev pages via ports.                                                                                                                                             |
 
 ### Event Glossary
@@ -104,7 +105,7 @@ Events by layer:
 | ------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | 1. Session    | `window.created`, `window.closed`, `window.resized`, `tab.created`, `tab.closed`, `tab.moved`, `tab.transferred` | Service worker (`chrome.windows.*`, `chrome.tabs.*`)            |
 | 2. Navigation | `nav.completed`, `nav.spa`, `nav.title_changed`                                                                  | Service worker (`chrome.webNavigation.*`)                       |
-| 3. Attention  | `attention.active`, `attention.visible`, `attention.mouse_presence`, `attention.idle`                            | Service worker (`chrome.tabs.onActivated`, `chrome.idle.*`)     |
+| 3. Attention  | `attention.active`, `attention.visible`, `attention.mouse_presence`, `attention.idle`                            | Service worker + content script (`chrome.tabs.onActivated`, `chrome.idle.*`, `visibilitychange`) |
 | 4. Keystrokes | `input.keystroke` (raw), `input.keystroke_batch` (normalized), `input.composition` (raw, consumed by normalizer) | Content script (`keydown`, `composition*`)                      |
 | 5. Mouse      | `input.click`, `input.double_click`, `input.context_menu`                                                        | Content script (`click`, `auxclick`, `dblclick`, `contextmenu`) |
 | 6. Scroll     | `input.scroll`                                                                                                   | Content script (`scroll`)                                       |
@@ -140,7 +141,12 @@ The Normalizer consumes raw `input.keystroke` and `input.composition` events —
 | 3. Attention  | `attention.active`, `attention.visible`, `attention.idle`                                                        |
 | 9. Media      | `media.audio`, `media.download`                                                                                  |
 
-These events come from Chrome extension APIs that are only available in the service worker context — they never touch the content script pipeline.
+Most of these come from Chrome extension APIs that are only available in the service worker context. The exception is `attention.visible`, which comes from **two sources**:
+
+- **Service worker**: `chrome.windows.onFocusChanged` — detects OS-level focus loss/gain (alt-tab to another app). Fires `WINDOW_ID_NONE` when all Chrome windows lose focus.
+- **Content script**: `visibility.ts` via `chrome.runtime.sendMessage` — detects per-tab visibility via the Page Visibility API (`document.visibilitychange`). Fires when a tab becomes hidden (tab switch, minimize) or visible (tab activated, unminimize). Does **not** fire on OS-level focus loss (tab stays "visible" even when Chrome is behind another app).
+
+Both are ingested as `attention.visible` signals into the aggregator. The content script signal is the primary authority for tab-level visibility; the service worker signal covers OS-level focus that the Page Visibility API misses.
 
 ```typescript
 // ── Pipeline stages ─────────────────────────────────────────
@@ -383,7 +389,7 @@ function observeSpaNavigation(onNavigate: (url: string) => void): void {
 │                             ▼                                           │
 │  ┌─ Navigation Graph ──────────────────────────────────────────────────┐│
 │  │                                                                     ││
-│  │   Nodes: sources (including "unknown")                              ││
+│  │   Nodes: sources (including "off_browser")                              ││
 │  │   Edges: directed, weighted by transition count                     ││
 │  │                                                                     ││
 │  │   root@42 ──3──▶ root@17 ──1──▶ unknown ──2──▶ root@42              ││
@@ -414,7 +420,7 @@ function observeSpaNavigation(onNavigate: (url: string) => void): void {
 | **Bundle**         | A collection of StampedCaptures from a single source during a single continuous focus span. Opened when a source gains focus, sealed when focus shifts away. On seal, `translate()` renders captures into `text`. |
 | **Translate**      | A function `(bundles: Bundle[]) => string` that renders Bundles into a single human/LLM-readable text stream. Runs on seal. Each Bundle stores the result in its `text` field.                                    |
 | **Edge**           | A directed, weighted connection between two sources in the navigation graph. Weight increments each time the user transitions from one source to another.                                                         |
-| **`"unknown"`**    | The off-browser source. A regular node in the graph with `source: "unknown"`. Has no Bundle (nothing to capture), but edges connect to and from it so the graph knows when the user left and returned.            |
+| **`"off_browser"`** | The off-browser source. A regular node in the graph with `source: "off_browser"`. Has no Bundle (nothing to capture), but edges connect to and from it so the graph knows when the user left and returned. The transition to `off_browser` is deferred by 200 ms to absorb focus flicker. |
 | **Group**          | A cluster of related sources discovered by partitioning the navigation graph (community detection). Sources that the user frequently navigates between end up in the same Group.                                  |
 | **Packet**         | The delivery unit. Contains Groups, each with its associated Bundles, plus the navigation graph edges. Sent to the server on sync.                                                                                |
 
@@ -426,13 +432,13 @@ The Aggregation Layer lives in the service worker. It has two responsibilities:
 
 - A **Bundle** is open for exactly one source at a time — the one the user is currently focused on.
 - When focus shifts (tab switch, browser blur, window change), the current Bundle is **sealed**, `translate()` renders its captures into the `text` field, and a new Bundle is opened for the newly focused source.
-- When the user leaves the browser entirely, the current Bundle is sealed and the active source becomes `"unknown"`. No Bundle is opened for it — there's nothing to capture. When the user returns, a new Bundle opens for the source they return to.
+- When the user leaves the browser entirely, the current Bundle is sealed and the active source becomes `"off_browser"` (after a 200 ms settle delay to absorb focus flicker). No Bundle is opened for it — there's nothing to capture. When the user returns, a new Bundle opens for the source they return to. The same treatment applies when switching to a window with no tracked tab (e.g. DevTools, extension popup, `chrome://` pages).
 
 **2. Translation** — on seal, `translate([bundle])` converts the Bundle's captures into a single plain-text stream stored in `bundle.text`. This is the LLM-readable representation of the user's activity during that focus span. The translate function takes `Bundle[]` so it can also be called on a group of Bundles to produce a combined narrative.
 
 **3. Navigation graph** — alongside bundling, every focus shift records a directed edge in a weighted graph.
 
-- Nodes are sources (including `"unknown"`).
+- Nodes are sources (including `"off_browser"`).
 - Each transition `A → B` increments the weight of edge `(A, B)`.
 - On sync, the graph is partitioned into **Groups** using community detection. Sources the user frequently navigates between cluster together.
 - Each sealed Bundle is assigned to its source's Group.
@@ -467,11 +473,11 @@ type Bundle = {
  */
 type Translate = (bundles: Bundle) => string;
 
-const UNKNOWN = "unknown";
+const OFF_BROWSER = "off_browser";
 
 type Edge = {
-  from: string;          // source id, e.g. "root@42", "unknown"
-  to: string;            // source id, e.g. "root@17", "unknown"
+  from: string;          // source id, e.g. "root@42", "off_browser"
+  to: string;            // source id, e.g. "root@17", "off_browser"
   weight: number;        // number of transitions
 };
 
@@ -543,16 +549,44 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
 
 // ── Focus shifts ────────────────────────────────────────────
 
-chrome.tabs.onActivated.addListener((info) => {
-  // tab switched — we'll learn the real source when the first Capture arrives,
-  // but we seal the current bundle now
+let offBrowserTimer: number | null = null;
+
+function startOffBrowserTimer(): void {
+  if (offBrowserTimer) clearTimeout(offBrowserTimer);
   seal();
+  offBrowserTimer = setTimeout(() => {
+    offBrowserTimer = null;
+    transition(OFF_BROWSER);
+  }, 200);
+}
+
+chrome.tabs.onActivated.addListener((info) => {
+  activeTabPerWindow.set(info.windowId, info.tabId);
+  // If the browser is losing OS focus, Chrome may fire a spurious
+  // onTabActivated. Don't let it cancel the off-browser timer.
+  if (offBrowserTimer) return;
+  const source = tabSources.get(info.tabId);
+  if (source) transition(source);
+  else seal();
 });
 
 chrome.windows.onFocusChanged.addListener((windowId) => {
   if (windowId === chrome.windows.WINDOW_ID_NONE) {
-    // user left the browser
-    transition(UNKNOWN);
+    startOffBrowserTimer();
+  } else {
+    if (offBrowserTimer) { clearTimeout(offBrowserTimer); offBrowserTimer = null; }
+    const tabId = activeTabPerWindow.get(windowId);
+    const source = tabId ? tabSources.get(tabId) : undefined;
+    if (source) transition(source);
+    else startOffBrowserTimer(); // DevTools, extension popup, etc.
+  }
+});
+
+// Content script visibility (Page Visibility API)
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (msg.type === "page:visibility") {
+    // Ingested as attention.visible signal into the active bundle
+    ingestSignal({ type: "attention.visible", visible: msg.visible, ... }, sender.tab.id);
   }
 });
 
@@ -562,8 +596,8 @@ function transition(to: string): void {
   const from = activeSource;
   seal();
 
-  // record edge
-  if (from !== null) {
+  // record edge (skip self-loops from focus flicker)
+  if (from !== null && from !== to) {
     const key = `${from}→${to}`;
     const existing = edges.get(key);
     if (existing) {
@@ -575,8 +609,8 @@ function transition(to: string): void {
 
   activeSource = to;
 
-  // don't open a bundle for unknown — nothing to capture
-  if (to !== UNKNOWN) {
+  // don't open a bundle for off_browser — nothing to capture
+  if (to !== OFF_BROWSER) {
     openBundle = { source: to, startedAt: Date.now(), endedAt: null, captures: [], text: null };
   }
 }

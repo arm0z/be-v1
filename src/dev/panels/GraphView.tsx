@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { DevEntry } from "@/event/dev";
-import { Expand, Scan, Shrink } from "lucide-react";
+import { Boxes, Expand, PanelRight, Scan, Shrink, Waypoints } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Props = { entries: DevEntry[] };
@@ -47,6 +48,7 @@ function fmtTime(ts: number): string {
 
 export function GraphView({ entries }: Props) {
 	const containerRef = useRef<HTMLDivElement>(null);
+	const canvasWrapRef = useRef<HTMLDivElement>(null);
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const tooltipRef = useRef<HTMLDivElement>(null);
 
@@ -72,6 +74,8 @@ export function GraphView({ entries }: Props) {
 
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [hoverNodeId, setHoverNodeId] = useState<string | null>(null);
+	const [activeTab, setActiveTab] = useState<"raw" | "grouped">("raw");
+	const [panelOpen, setPanelOpen] = useState(false);
 
 	// --- data extraction ---
 	const processEntries = useCallback(() => {
@@ -417,20 +421,20 @@ export function GraphView({ entries }: Props) {
 
 	// --- canvas resize ---
 	useEffect(() => {
-		const container = containerRef.current;
+		const wrap = canvasWrapRef.current;
 		const canvas = canvasRef.current;
-		if (!container || !canvas) return;
+		if (!wrap || !canvas) return;
 
 		const ro = new ResizeObserver(() => {
 			const dpr = window.devicePixelRatio || 1;
-			const rect = container.getBoundingClientRect();
+			const rect = wrap.getBoundingClientRect();
 			canvas.width = rect.width * dpr;
 			canvas.height = rect.height * dpr;
 			canvas.style.width = `${rect.width}px`;
 			canvas.style.height = `${rect.height}px`;
 		});
 
-		ro.observe(container);
+		ro.observe(wrap);
 		return () => ro.disconnect();
 	}, []);
 
@@ -751,28 +755,67 @@ export function GraphView({ entries }: Props) {
 	return (
 		<div
 			ref={containerRef}
-			className="relative h-full w-full bg-background"
+			className="relative flex h-full w-full bg-background"
 		>
-			<canvas ref={canvasRef} className="block h-full w-full" />
-			{tooltipContent}
-			<div className="absolute right-2 top-2 flex gap-1">
-				<Button
-					variant="outline"
-					size="icon-xs"
-					onClick={fitToView}
-					title="Fit to view"
+			<div ref={canvasWrapRef} className="relative flex-1 overflow-hidden">
+				<canvas ref={canvasRef} className="block h-full w-full" />
+				{tooltipContent}
+				<Tabs
+					value={activeTab}
+					onValueChange={(v) =>
+						setActiveTab(v as "raw" | "grouped")
+					}
+					className="absolute left-2 top-2 z-10"
 				>
-					<Scan />
-				</Button>
-				<Button
-					variant="outline"
-					size="icon-xs"
-					onClick={toggleFullscreen}
-					title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-				>
-					{isFullscreen ? <Shrink /> : <Expand />}
-				</Button>
+					<TabsList className="h-auto border border-border bg-popover/80 p-0.5 backdrop-blur-sm">
+						<TabsTrigger
+							value="raw"
+							className="h-auto px-2 py-0.5 text-xs"
+						>
+							<Waypoints className="size-3" />
+							Raw
+						</TabsTrigger>
+						<TabsTrigger
+							value="grouped"
+							className="h-auto px-2 py-0.5 text-xs"
+						>
+							<Boxes className="size-3" />
+							Grouped
+						</TabsTrigger>
+					</TabsList>
+				</Tabs>
+				<div className="absolute right-2 top-2 flex gap-1">
+					<Button
+						variant="outline"
+						size="icon-xs"
+						onClick={fitToView}
+						title="Fit to view"
+					>
+						<Scan />
+					</Button>
+					<Button
+						variant="outline"
+						size="icon-xs"
+						onClick={toggleFullscreen}
+						title={
+							isFullscreen ? "Exit fullscreen" : "Fullscreen"
+						}
+					>
+						{isFullscreen ? <Shrink /> : <Expand />}
+					</Button>
+					<Button
+						variant="outline"
+						size="icon-xs"
+						onClick={() => setPanelOpen((o) => !o)}
+						title={panelOpen ? "Close panel" : "Open panel"}
+					>
+						<PanelRight />
+					</Button>
+				</div>
 			</div>
+			{panelOpen && (
+				<div className="flex h-full w-72 shrink-0 flex-col border-l border-border bg-background" />
+			)}
 		</div>
 	);
 }

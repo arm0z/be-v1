@@ -1,5 +1,5 @@
 import type { StampedCapture, StampedSignal, Bundle } from "./types.ts";
-import { UNKNOWN } from "./types.ts";
+import { UNKNOWN, OFF_BROWSER } from "./types.ts";
 import { translate } from "./translate.ts";
 import { dev } from "../event/dev.ts";
 import type { createGraph } from "./graph.ts";
@@ -36,12 +36,12 @@ export function createBundler(graph: ReturnType<typeof createGraph>) {
     function transition(to: string): void {
         seal();
         const from = activeSource;
-        if (from) {
+        if (from && from !== to) {
             graph.recordEdge(from, to);
         }
         dev.log("aggregator", "transition", `${from ?? "∅"} → ${to}`, { from, to });
         activeSource = to;
-        if (to !== UNKNOWN) {
+        if (to !== UNKNOWN && to !== OFF_BROWSER) {
             openNew(to);
         }
     }
@@ -49,6 +49,8 @@ export function createBundler(graph: ReturnType<typeof createGraph>) {
     function ingest(stamped: StampedCapture): void {
         if (activeSource === null || stamped.source !== activeSource) {
             transition(stamped.source);
+        } else if (!openBundle) {
+            openNew(stamped.source);
         }
         openBundle!.captures.push(stamped);
     }
@@ -62,6 +64,16 @@ export function createBundler(graph: ReturnType<typeof createGraph>) {
         return activeSource;
     }
 
+    function getOpenBundle(): { source: string; startedAt: number; captureCount: number; captures: { type: string; timestamp: number }[] } | null {
+        if (!openBundle) return null;
+        return {
+            source: openBundle.source,
+            startedAt: openBundle.startedAt,
+            captureCount: openBundle.captures.length,
+            captures: openBundle.captures.map((c) => ({ type: c.type, timestamp: c.timestamp })),
+        };
+    }
+
     function getSealed(): Bundle[] {
         return [...sealed];
     }
@@ -72,5 +84,5 @@ export function createBundler(graph: ReturnType<typeof createGraph>) {
         return result;
     }
 
-    return { ingest, ingestSignal, getActiveSource, seal, transition, getSealed, drainSealed };
+    return { ingest, ingestSignal, getActiveSource, getOpenBundle, seal, transition, getSealed, drainSealed };
 }

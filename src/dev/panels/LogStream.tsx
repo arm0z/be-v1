@@ -1,11 +1,15 @@
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import type { DevChannel, DevEntry } from "@/event/dev";
 import { cn } from "@/lib/utils";
 import {
+	Check,
 	ChevronRight,
+	Copy,
 	Pause,
 	Play,
 	Search,
+	SlidersHorizontal,
 	Trash2,
 	X,
 } from "lucide-react";
@@ -16,6 +20,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { ALL_EVENTS, FilterToggles } from "./FilterToggles";
 
 // ── Constants ────────────────────────────────────────────
 
@@ -30,18 +35,6 @@ const ALL_CHANNELS: DevChannel[] = [
 	"persistence",
 ];
 
-const CHANNEL_COLORS: Record<DevChannel, string> = {
-	tap: "sky",
-	adapter: "amber",
-	normalizer: "violet",
-	relay: "rose",
-	aggregator: "emerald",
-	graph: "blue",
-	sync: "orange",
-	persistence: "teal",
-};
-
-// Tailwind needs full class strings (no interpolation) to detect them.
 const CHANNEL_CLASSES: Record<DevChannel, string> = {
 	tap: "border-sky-500/50 bg-sky-500/10 text-sky-400",
 	adapter: "border-amber-500/50 bg-amber-500/10 text-amber-400",
@@ -57,6 +50,11 @@ const CHANNEL_CLASSES: Record<DevChannel, string> = {
 
 type LogGroup = {
 	entries: DevEntry[];
+};
+
+type DevFilter = {
+	channels: Record<DevChannel, boolean>;
+	events: Record<string, boolean>;
 };
 
 function formatTimestamp(ts: number) {
@@ -83,6 +81,105 @@ function groupConsecutive(entries: DevEntry[]): LogGroup[] {
 
 // ── Sub-components ───────────────────────────────────────
 
+function CopyButton({ text, className }: { text: string; className?: string }) {
+	const [copied, setCopied] = useState(false);
+
+	const handleCopy = useCallback(
+		async (e: React.MouseEvent) => {
+			e.stopPropagation();
+			await navigator.clipboard.writeText(text);
+			setCopied(true);
+			setTimeout(() => setCopied(false), 1500);
+		},
+		[text],
+	);
+
+	return (
+		<Button
+			variant="ghost"
+			size="icon-xs"
+			onClick={handleCopy}
+			className={cn("text-muted-foreground", className)}
+			title="Copy to clipboard"
+		>
+			{copied ? (
+				<Check className="text-emerald-400" />
+			) : (
+				<Copy />
+			)}
+		</Button>
+	);
+}
+
+function EventFilterPopover({
+	filter,
+	setEventFilter,
+}: {
+	filter: DevFilter | null;
+	setEventFilter: (events: Partial<Record<string, boolean>>) => void;
+}) {
+	const [open, setOpen] = useState(false);
+	const closeTimer = useRef<ReturnType<typeof setTimeout>>();
+	const containerRef = useRef<HTMLDivElement>(null);
+
+	const hiddenCount = useMemo(() => {
+		if (!filter) return 0;
+		return ALL_EVENTS.filter((e) => filter.events[e] === false).length;
+	}, [filter]);
+
+	const handleEnter = useCallback(() => {
+		clearTimeout(closeTimer.current);
+		setOpen(true);
+	}, []);
+
+	const handleLeave = useCallback(() => {
+		closeTimer.current = setTimeout(() => setOpen(false), 200);
+	}, []);
+
+	useEffect(() => () => clearTimeout(closeTimer.current), []);
+
+	return (
+		<div
+			ref={containerRef}
+			className="relative"
+			onMouseEnter={handleEnter}
+			onMouseLeave={handleLeave}
+		>
+			<Button
+				variant="ghost"
+				size="xs"
+				onClick={() => setOpen((p) => !p)}
+				className={cn(
+					"relative",
+					open
+						? "bg-foreground/10 text-foreground"
+						: "text-muted-foreground",
+				)}
+				title="Event filters"
+			>
+				<SlidersHorizontal />
+				Events
+				{hiddenCount > 0 && (
+					<span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold leading-none text-white">
+						{hiddenCount}
+					</span>
+				)}
+			</Button>
+
+			{open && (
+				<div className="absolute left-1/2 top-full z-50 mt-1 w-80 -translate-x-1/2 rounded-lg border bg-background p-4 shadow-lg">
+					<div className="dev-scrollbar max-h-72 overflow-y-auto pr-1">
+						<FilterToggles
+							filter={filter}
+							setEventFilter={setEventFilter}
+						/>
+					</div>
+				</div>
+			)}
+		</div>
+	);
+}
+
 function LogToolbar({
 	search,
 	onSearchChange,
@@ -90,6 +187,9 @@ function LogToolbar({
 	onTogglePause,
 	count,
 	onClear,
+	onCopyAll,
+	filter,
+	setEventFilter,
 }: {
 	search: string;
 	onSearchChange: (v: string) => void;
@@ -97,7 +197,18 @@ function LogToolbar({
 	onTogglePause: () => void;
 	count: number;
 	onClear: () => void;
+	onCopyAll: () => void;
+	filter: DevFilter | null;
+	setEventFilter: (events: Partial<Record<string, boolean>>) => void;
 }) {
+	const [copyFeedback, setCopyFeedback] = useState(false);
+
+	const handleCopyAll = useCallback(() => {
+		onCopyAll();
+		setCopyFeedback(true);
+		setTimeout(() => setCopyFeedback(false), 1500);
+	}, [onCopyAll]);
+
 	return (
 		<div className="flex items-center gap-2 border-b bg-background px-3 py-1.5">
 			{/* Search */}
@@ -111,49 +222,69 @@ function LogToolbar({
 					className="h-8 w-full rounded-md border bg-transparent pl-8 pr-8 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
 				/>
 				{search && (
-					<button
-						type="button"
+					<Button
+						variant="ghost"
+						size="icon-xs"
 						onClick={() => onSearchChange("")}
-						className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+						className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground"
 					>
-						<X className="h-3.5 w-3.5" />
-					</button>
+						<X />
+					</Button>
 				)}
 			</div>
 
+			{/* Event filters popover */}
+			<EventFilterPopover
+				filter={filter}
+				setEventFilter={setEventFilter}
+			/>
+
 			{/* Pause / Play */}
-			<button
-				type="button"
+			<Button
+				variant="ghost"
+				size="xs"
 				onClick={onTogglePause}
 				className={cn(
-					"inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
 					paused
 						? "bg-amber-500/10 text-amber-400"
-						: "text-muted-foreground hover:text-foreground",
+						: "text-muted-foreground",
 				)}
 			>
-				{paused ? (
-					<Play className="h-3.5 w-3.5" />
-				) : (
-					<Pause className="h-3.5 w-3.5" />
-				)}
+				{paused ? <Play /> : <Pause />}
 				{paused ? "Resume" : "Pause"}
-			</button>
+			</Button>
 
 			{/* Entry count */}
 			<span className="text-xs tabular-nums text-muted-foreground">
 				{count}
 			</span>
 
-			{/* Clear */}
-			<button
-				type="button"
-				onClick={onClear}
-				className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+			{/* Copy all */}
+			<Button
+				variant="ghost"
+				size="xs"
+				onClick={handleCopyAll}
+				className="text-muted-foreground"
+				title="Copy all visible logs"
 			>
-				<Trash2 className="h-3.5 w-3.5" />
+				{copyFeedback ? (
+					<Check className="text-emerald-400" />
+				) : (
+					<Copy />
+				)}
+				Copy
+			</Button>
+
+			{/* Clear */}
+			<Button
+				variant="ghost"
+				size="xs"
+				onClick={onClear}
+				className="text-muted-foreground"
+			>
+				<Trash2 />
 				Clear
-			</button>
+			</Button>
 		</div>
 	);
 }
@@ -161,12 +292,32 @@ function LogToolbar({
 function ChannelFilters({
 	activeChannels,
 	onToggle,
+	onToggleAll,
 }: {
 	activeChannels: Set<DevChannel>;
 	onToggle: (ch: DevChannel) => void;
+	onToggleAll: () => void;
 }) {
+	const checkRef = useRef<HTMLInputElement>(null);
+	const allSelected = activeChannels.size === ALL_CHANNELS.length;
+	const noneSelected = activeChannels.size === 0;
+
+	useEffect(() => {
+		if (checkRef.current) {
+			checkRef.current.indeterminate = !allSelected && !noneSelected;
+		}
+	}, [allSelected, noneSelected]);
+
 	return (
 		<div className="flex flex-wrap items-center gap-1.5 border-b bg-background px-3 py-1.5">
+			<input
+				ref={checkRef}
+				type="checkbox"
+				checked={allSelected}
+				onChange={onToggleAll}
+				className="h-3.5 w-3.5 cursor-pointer rounded border-muted-foreground accent-foreground"
+				title={allSelected ? "Deselect all channels" : "Select all channels"}
+			/>
 			{ALL_CHANNELS.map((ch) => (
 				<button key={ch} type="button" onClick={() => onToggle(ch)}>
 					<Badge
@@ -196,49 +347,57 @@ function SingleEntryRow({
 }) {
 	return (
 		<div className="group">
-			<button
-				type="button"
-				onClick={onToggle}
-				className="flex w-full cursor-pointer items-start gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-muted/50"
-			>
-				{/* Expand chevron */}
-				<span className="mt-0.5 w-3 shrink-0">
-					<ChevronRight
-						className={cn(
-							"h-3 w-3 text-muted-foreground transition-transform",
-							expanded && "rotate-90",
-						)}
-					/>
-				</span>
-
-				{/* Channel badge — fixed width, centered */}
-				<Badge
-					variant="outline"
-					className={cn(CHANNEL_CLASSES[entry.channel], "w-20 justify-center text-[10px] font-normal px-1.5 py-0")}
+			<div className="flex w-full items-start gap-2 px-3 py-1.5 text-xs transition-colors hover:bg-muted/50">
+				<button
+					type="button"
+					onClick={onToggle}
+					className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 text-left"
 				>
-					{entry.channel}
-				</Badge>
-
-				{/* Timestamp */}
-				<span className="mt-0.5 shrink-0 tabular-nums text-muted-foreground">
-					{formatTimestamp(entry.timestamp)}
-				</span>
-
-				{/* Event + message */}
-				<div className="flex min-w-0 flex-1 items-baseline gap-1.5">
-					{entry.event && (
-						<span className="shrink-0 font-medium text-foreground">
-							{entry.event}
-						</span>
-					)}
-					<span className="min-w-0 flex-1 truncate text-muted-foreground">
-						{entry.message}
+					{/* Expand chevron */}
+					<span className="mt-0.5 w-3 shrink-0">
+						<ChevronRight
+							className={cn(
+								"h-3 w-3 text-muted-foreground transition-transform",
+								expanded && "rotate-90",
+							)}
+						/>
 					</span>
-				</div>
-			</button>
+
+					{/* Channel badge */}
+					<Badge
+						variant="outline"
+						className={cn(CHANNEL_CLASSES[entry.channel], "w-20 justify-center text-[10px] font-normal px-1.5 py-0")}
+					>
+						{entry.channel}
+					</Badge>
+
+					{/* Timestamp */}
+					<span className="mt-0.5 shrink-0 tabular-nums text-muted-foreground">
+						{formatTimestamp(entry.timestamp)}
+					</span>
+
+					{/* Event + message */}
+					<div className="flex min-w-0 flex-1 items-baseline gap-1.5">
+						{entry.event && (
+							<span className="shrink-0 font-medium text-foreground">
+								{entry.event}
+							</span>
+						)}
+						<span className="min-w-0 flex-1 truncate text-muted-foreground">
+							{entry.message}
+						</span>
+					</div>
+				</button>
+
+				{/* Copy */}
+				<CopyButton
+					text={JSON.stringify(entry, null, 2)}
+					className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+				/>
+			</div>
 
 			{expanded && (
-				<pre className="mx-3 mb-1 ml-[2.75rem] overflow-x-auto rounded border bg-muted/30 p-2 text-[11px] text-muted-foreground">
+				<pre className="mx-3 mb-1 ml-[2.75rem] dev-scrollbar overflow-x-auto rounded border bg-muted/30 p-2 text-[11px] text-muted-foreground">
 					{JSON.stringify(entry, null, 2)}
 				</pre>
 			)}
@@ -258,50 +417,58 @@ function CollapsedGroupRow({
 	const first = group.entries[0];
 
 	return (
-		<div>
-			<button
-				type="button"
-				onClick={onToggle}
-				className="flex w-full cursor-pointer items-start gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-muted/50"
-			>
-				<span className="mt-0.5 w-3 shrink-0">
-					<ChevronRight
-						className={cn(
-							"h-3 w-3 text-muted-foreground transition-transform",
-							expanded && "rotate-90",
-						)}
-					/>
-				</span>
-
-				<Badge
-					variant="outline"
-					className={cn(CHANNEL_CLASSES[first.channel], "w-20 justify-center text-[10px] font-normal px-1.5 py-0")}
+		<div className="group/collapsed">
+			<div className="flex w-full items-start gap-2 px-3 py-1.5 text-xs transition-colors hover:bg-muted/50">
+				<button
+					type="button"
+					onClick={onToggle}
+					className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 text-left"
 				>
-					{first.channel}
-				</Badge>
-
-				<span className="mt-0.5 shrink-0 tabular-nums text-muted-foreground">
-					{formatTimestamp(first.timestamp)}
-				</span>
-
-				<div className="flex min-w-0 flex-1 items-baseline gap-1.5">
-					{first.event && (
-						<span className="shrink-0 font-medium text-foreground">
-							{first.event}
-						</span>
-					)}
-					<span className="shrink-0 tabular-nums text-muted-foreground">
-						x{group.entries.length}
+					<span className="mt-0.5 w-3 shrink-0">
+						<ChevronRight
+							className={cn(
+								"h-3 w-3 text-muted-foreground transition-transform",
+								expanded && "rotate-90",
+							)}
+						/>
 					</span>
-				</div>
-			</button>
+
+					<Badge
+						variant="outline"
+						className={cn(CHANNEL_CLASSES[first.channel], "w-20 justify-center text-[10px] font-normal px-1.5 py-0")}
+					>
+						{first.channel}
+					</Badge>
+
+					<span className="mt-0.5 shrink-0 tabular-nums text-muted-foreground">
+						{formatTimestamp(first.timestamp)}
+					</span>
+
+					<div className="flex min-w-0 flex-1 items-baseline gap-1.5">
+						{first.event && (
+							<span className="shrink-0 font-medium text-foreground">
+								{first.event}
+							</span>
+						)}
+						<span className="shrink-0 tabular-nums text-muted-foreground">
+							x{group.entries.length}
+						</span>
+					</div>
+				</button>
+
+				{/* Copy all entries in group */}
+				<CopyButton
+					text={JSON.stringify(group.entries, null, 2)}
+					className="shrink-0 opacity-0 transition-opacity group-hover/collapsed:opacity-100"
+				/>
+			</div>
 
 			{expanded && (
 				<div className="divide-y border-l-2 border-muted ml-[1.65rem]">
 					{group.entries.map((entry, j) => (
 						<div
 							key={`${entry.timestamp}-${j}`}
-							className="px-3 py-1 text-xs"
+							className="group/entry px-3 py-1 text-xs"
 						>
 							<div className="flex items-start gap-2">
 								<span className="w-3 shrink-0" />
@@ -312,8 +479,12 @@ function CollapsedGroupRow({
 								<span className="min-w-0 flex-1 truncate text-muted-foreground">
 									{entry.message}
 								</span>
+								<CopyButton
+									text={JSON.stringify(entry, null, 2)}
+									className="shrink-0 opacity-0 transition-opacity group-hover/entry:opacity-100"
+								/>
 							</div>
-							<pre className="mt-1 ml-[5.75rem] overflow-x-auto rounded border bg-muted/30 p-2 text-[11px] text-muted-foreground">
+							<pre className="mt-1 ml-[5.75rem] dev-scrollbar overflow-x-auto rounded border bg-muted/30 p-2 text-[11px] text-muted-foreground">
 								{JSON.stringify(entry, null, 2)}
 							</pre>
 						</div>
@@ -329,9 +500,11 @@ function CollapsedGroupRow({
 type Props = {
 	entries: DevEntry[];
 	onClear: () => void;
+	filter: DevFilter | null;
+	setEventFilter: (events: Partial<Record<string, boolean>>) => void;
 };
 
-export function LogStream({ entries, onClear }: Props) {
+export function LogStream({ entries, onClear, filter, setEventFilter }: Props) {
 	const [search, setSearch] = useState("");
 	const [activeChannels, setActiveChannels] = useState<Set<DevChannel>>(
 		() => new Set(ALL_CHANNELS),
@@ -349,7 +522,6 @@ export function LogStream({ entries, onClear }: Props) {
 	const togglePause = useCallback(() => {
 		setPaused((prev) => {
 			if (!prev) {
-				// Entering paused state — capture snapshot
 				pausedEntriesRef.current = entries;
 			}
 			return !prev;
@@ -367,6 +539,13 @@ export function LogStream({ entries, onClear }: Props) {
 			if (next.has(ch)) next.delete(ch);
 			else next.add(ch);
 			return next;
+		});
+	}, []);
+
+	const toggleAllChannels = useCallback(() => {
+		setActiveChannels((prev) => {
+			if (prev.size === ALL_CHANNELS.length) return new Set();
+			return new Set(ALL_CHANNELS);
 		});
 	}, []);
 
@@ -394,6 +573,10 @@ export function LogStream({ entries, onClear }: Props) {
 	}, [displayEntries, activeChannels, search]);
 
 	const groups = useMemo(() => groupConsecutive(filtered), [filtered]);
+
+	const handleCopyAll = useCallback(() => {
+		navigator.clipboard.writeText(JSON.stringify(filtered, null, 2));
+	}, [filtered]);
 
 	// Auto-scroll: only when user is near bottom and not paused
 	const bottomRef = useRef<HTMLDivElement>(null);
@@ -432,14 +615,18 @@ export function LogStream({ entries, onClear }: Props) {
 					onTogglePause={togglePause}
 					count={filtered.length}
 					onClear={handleClear}
+					onCopyAll={handleCopyAll}
+					filter={filter}
+					setEventFilter={setEventFilter}
 				/>
 				<ChannelFilters
 					activeChannels={activeChannels}
 					onToggle={toggleChannel}
+					onToggleAll={toggleAllChannels}
 				/>
 			</div>
 
-			<div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+			<div ref={scrollRef} className="dev-scrollbar min-h-0 flex-1 overflow-y-auto">
 				{filtered.length === 0 ? (
 					<p className="py-8 text-center text-sm text-muted-foreground">
 						{entries.length === 0
