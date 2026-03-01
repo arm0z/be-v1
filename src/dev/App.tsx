@@ -241,16 +241,19 @@ export default function App() {
     useDevToasts(port.entries);
 
     const onReady = useCallback((event: DockviewReadyEvent) => {
+        let firstPanel: ReturnType<typeof event.api.addPanel> | null = null;
         for (const def of panelDefs) {
             const id = `${def.type}-${++nextId}`;
-            event.api.addPanel({
+            const panel = event.api.addPanel({
                 id,
                 component: def.component,
                 tabComponent: "tab",
                 title: def.title,
                 params: { panelType: def.type },
             });
+            if (!firstPanel) firstPanel = panel;
         }
+        firstPanel?.api.setActive();
 
         // always keep at least one tab open
         event.api.onDidRemovePanel(() => {

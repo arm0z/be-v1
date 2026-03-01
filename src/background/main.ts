@@ -420,6 +420,7 @@ if (import.meta.env.DEV) {
           }
         | { type: "setEventFilter"; events: Partial<Record<string, boolean>> }
         | { type: "sync.flush" }
+        | { type: "sync.peek" }
         | { type: "sync.send" }
         | { type: "checkpoint.save" }
         | { type: "sync.drain_retry" }
@@ -510,6 +511,15 @@ if (import.meta.env.DEV) {
                     "sync",
                     "sync.flush",
                     packet ? `packet ${packet.id}` : "nothing to flush",
+                    { packet: packet ?? null },
+                );
+            }
+            if (msg.type === "sync.peek") {
+                const packet = packer.peek();
+                dev.log(
+                    "sync",
+                    "sync.flush",
+                    packet ? `peek packet ${packet.id}` : "nothing to peek",
                     { packet: packet ?? null },
                 );
             }

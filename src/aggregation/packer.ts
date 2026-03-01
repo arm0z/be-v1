@@ -17,14 +17,19 @@ import { preprocess } from "./preprocess.ts";
 
 export function createPacker(aggregator: Aggregator): {
     flush(): Packet | null;
+    peek(): Packet | null;
 } {
-    function flush(): Packet | null {
+    function pack(destructive: boolean): Packet | null {
         // 1. Seal any in-flight bundle so no data is lost
         aggregator.seal();
 
-        // 2. Drain all accumulated data (destructive reads)
-        const bundles = aggregator.drainSealed();
-        const transitions = aggregator.drainTransitions();
+        // 2. Read accumulated data (destructive or non-destructive)
+        const bundles = destructive
+            ? aggregator.drainSealed()
+            : aggregator.getSealed();
+        const transitions = destructive
+            ? aggregator.drainTransitions()
+            : aggregator.getTransitions();
 
         // 3. Nothing to pack
         if (bundles.length === 0) return null;
@@ -40,7 +45,8 @@ export function createPacker(aggregator: Aggregator): {
             createdAt: Date.now(),
         };
 
-        dev.log("packer", "pack.flushed", `packet ${packet.id}`, {
+        const kind = destructive ? "pack.flushed" : "pack.peeked";
+        dev.log("packer", kind, `packet ${packet.id}`, {
             groups: groups.length,
             bundles: bundles.length,
             edges: edges.length,
@@ -50,7 +56,15 @@ export function createPacker(aggregator: Aggregator): {
         return packet;
     }
 
-    return { flush };
+    function flush(): Packet | null {
+        return pack(true);
+    }
+
+    function peek(): Packet | null {
+        return pack(false);
+    }
+
+    return { flush, peek };
 }
 
 // ── Internal helpers ────────────────────────────────────────

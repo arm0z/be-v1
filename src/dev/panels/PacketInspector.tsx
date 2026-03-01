@@ -6,8 +6,10 @@ import {
     ChevronsUpDown,
     Clipboard,
     ClipboardCheck,
+    Eye,
     LayoutList,
     Package,
+    Trash2,
     Upload,
 } from "lucide-react";
 import type { Edge, Group, GroupMeta, Packet } from "@/aggregation/types";
@@ -285,10 +287,12 @@ export function PacketInspector({
     onSend?: (msg: { type: string }) => void;
 }) {
     const [format, setFormat] = useState("formatted");
+    const [clearedAt, setClearedAt] = useState(0);
 
-    // Find the last flushed packet from dev entries
+    // Find the last flushed packet from dev entries (after last clear)
     const packet = useMemo(() => {
         for (let i = entries.length - 1; i >= 0; i--) {
+            if (i < clearedAt) break;
             const e = entries[i];
             if (
                 (e.event === "sync.flush" || e.event === "pack.flushed") &&
@@ -299,13 +303,22 @@ export function PacketInspector({
             }
         }
         return null;
-    }, [entries]);
+    }, [entries, clearedAt]);
 
     return (
         <div className="flex h-full flex-col overflow-hidden">
             <div className="flex shrink-0 items-center justify-between gap-2 px-4 pt-3">
                 {onSend ? (
                     <div className="flex items-center gap-1">
+                        <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => onSend({ type: "sync.peek" })}
+                            className="text-muted-foreground"
+                        >
+                            <Eye className="size-3" />
+                            Peek
+                        </Button>
                         <Button
                             variant="ghost"
                             size="xs"
@@ -323,6 +336,15 @@ export function PacketInspector({
                         >
                             <Upload className="size-3" />
                             Send
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => setClearedAt(entries.length)}
+                            className="text-muted-foreground"
+                        >
+                            <Trash2 className="size-3" />
+                            Clear
                         </Button>
                     </div>
                 ) : (
