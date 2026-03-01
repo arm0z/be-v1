@@ -1,6 +1,7 @@
 import {
     DockviewReact,
     type DockviewReadyEvent,
+    type DockviewTheme,
     type IDockviewPanelProps,
 } from "dockview";
 import { Box, GitGraph, ScrollText } from "lucide-react";
@@ -63,6 +64,13 @@ const tabComponents = {
     tab: TabIcon,
 };
 
+/* ── theme ────────────────────────────────────────────────────── */
+
+const neutralTheme: DockviewTheme = {
+    name: "neutral",
+    className: "dockview-theme-neutral",
+};
+
 /* ── main app ─────────────────────────────────────────────────── */
 
 export default function App() {
@@ -94,7 +102,7 @@ export default function App() {
     return (
         <DevContext.Provider value={port}>
             <DockviewReact
-                className="dockview-theme-neutral"
+                theme={neutralTheme}
                 components={components}
                 tabComponents={tabComponents}
                 onReady={onReady}
