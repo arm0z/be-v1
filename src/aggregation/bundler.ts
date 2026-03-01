@@ -4,10 +4,15 @@ import { translate } from "./translate.ts";
 import { dev } from "../event/dev.ts";
 import type { createGraph } from "./graph.ts";
 
+const DWELL_MS = 500;
+
 export function createBundler(graph: ReturnType<typeof createGraph>) {
     let activeSource: string | null = null;
+    let graphCursor: string | null = null;
     let openBundle: Bundle | null = null;
     const sealed: Bundle[] = [];
+    let pendingEdge: { from: string; to: string; arrivedAt: number } | null = null;
+    let dwellTimer: ReturnType<typeof setTimeout> | null = null;
 
     function openNew(source: string): void {
         openBundle = {
@@ -33,17 +38,65 @@ export function createBundler(graph: ReturnType<typeof createGraph>) {
         openBundle = null;
     }
 
+    function commitPending(): void {
+        if (dwellTimer) { clearTimeout(dwellTimer); dwellTimer = null; }
+        if (pendingEdge) {
+            graph.recordEdge(pendingEdge.from, pendingEdge.to);
+            pendingEdge = null;
+        }
+    }
+
     function transition(to: string): void {
         seal();
-        const from = activeSource;
-        if (from && from !== to) {
-            graph.recordEdge(from, to);
+        if (dwellTimer) { clearTimeout(dwellTimer); dwellTimer = null; }
+        const now = Date.now();
+
+        if (pendingEdge) {
+            const elapsed = now - pendingEdge.arrivedAt;
+            if (elapsed >= DWELL_MS) {
+                // Destination was held long enough — commit
+                graph.recordEdge(pendingEdge.from, pendingEdge.to);
+                if (pendingEdge.to !== to) {
+                    pendingEdge = { from: pendingEdge.to, to, arrivedAt: now };
+                } else {
+                    pendingEdge = null;
+                }
+            } else {
+                // Too brief — collapse the intermediate node
+                // A → X(brief) → B  becomes  A → B
+                if (pendingEdge.from !== to) {
+                    pendingEdge = { from: pendingEdge.from, to, arrivedAt: now };
+                } else {
+                    // Returned to origin — cancel entirely
+                    pendingEdge = null;
+                }
+            }
+        } else {
+            const from = graphCursor;
+            if (from && from !== to) {
+                pendingEdge = { from, to, arrivedAt: now };
+            }
         }
-        dev.log("aggregator", "transition", `${from ?? "∅"} → ${to}`, { from, to });
+
+        // Auto-commit after dwell threshold if user stays
+        if (pendingEdge) {
+            dwellTimer = setTimeout(commitPending, DWELL_MS);
+        }
+
+        dev.log("aggregator", "transition", `${graphCursor ?? "∅"} → ${to}`, { from: graphCursor, to });
+        graphCursor = to;
         activeSource = to;
         if (to !== UNKNOWN && to !== OFF_BROWSER) {
             openNew(to);
         }
+    }
+
+    function moveCursor(to: string): void {
+        graphCursor = to;
+    }
+
+    function getGraphCursor(): string | null {
+        return graphCursor;
     }
 
     function ingest(stamped: StampedCapture): void {
@@ -56,7 +109,13 @@ export function createBundler(graph: ReturnType<typeof createGraph>) {
     }
 
     function ingestSignal(stamped: StampedSignal): void {
-        if (!openBundle) return; // no open bundle → silently drop
+        if (!openBundle) {
+            if (activeSource && activeSource !== UNKNOWN && activeSource !== OFF_BROWSER) {
+                openNew(activeSource);
+            } else {
+                return;
+            }
+        }
         openBundle.captures.push(stamped);
     }
 
@@ -84,5 +143,5 @@ export function createBundler(graph: ReturnType<typeof createGraph>) {
         return result;
     }
 
-    return { ingest, ingestSignal, getActiveSource, getOpenBundle, seal, transition, getSealed, drainSealed };
+    return { ingest, ingestSignal, getActiveSource, getGraphCursor, getOpenBundle, seal, transition, moveCursor, getSealed, drainSealed, commitPending };
 }

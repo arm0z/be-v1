@@ -26,6 +26,7 @@ export type Aggregator = {
     ingestSignal(signal: Signal, tabId: string): void;
     onTabActivated(tabId: string, windowId: number): void;
     onWindowFocusChanged(windowId: number): void;
+    onWindowRemoved(windowId: number): void;
     getSealed(): Bundle[];
     getEdges(): Edge[];
     drainSealed(): Bundle[];

@@ -52,6 +52,7 @@ chrome.windows.onCreated.addListener((window) => {
 });
 
 chrome.windows.onRemoved.addListener((windowId) => {
+    aggregator.onWindowRemoved(windowId);
     dev.log("tap", "window.closed", "window closed", { windowId });
 });
 
@@ -185,18 +186,30 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
     });
 });
 
+let lastFocusedWindowId: number | null = null;
+
 chrome.windows.onFocusChanged.addListener((windowId) => {
+    const prevWindowId = lastFocusedWindowId;
+    lastFocusedWindowId = windowId === chrome.windows.WINDOW_ID_NONE ? null : windowId;
+
     aggregator.onWindowFocusChanged(windowId);
+
     if (windowId === chrome.windows.WINDOW_ID_NONE) {
-        dev.log("tap", "attention.visible", "browser lost focus", {
-            visible: false,
-            url: "",
-            title: "",
-        });
-        aggregator.ingestSignal(
-            { type: "attention.visible", timestamp: Date.now(), payload: { visible: false, url: "", title: "" } },
-            "unknown",
-        );
+        if (prevWindowId !== null) {
+            chrome.tabs.query({ active: true, windowId: prevWindowId }, (tabs) => {
+                const tab = tabs[0];
+                const tabId = tab?.id !== undefined ? String(tab.id) : "unknown";
+                dev.log("tap", "attention.visible", "browser lost focus", {
+                    visible: false,
+                    url: tab?.url ?? "",
+                    title: tab?.title ?? "",
+                });
+                aggregator.ingestSignal(
+                    { type: "attention.visible", timestamp: Date.now(), payload: { visible: false, url: tab?.url ?? "", title: tab?.title ?? "" } },
+                    tabId,
+                );
+            });
+        }
     } else {
         chrome.tabs.query({ active: true, windowId }, (tabs) => {
             const tab = tabs[0];

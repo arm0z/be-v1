@@ -1,6 +1,7 @@
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { Box, GitGraph, ScrollText } from "lucide-react";
+import { Box, GitGraph, ScrollText, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { GraphView } from "./panels/GraphView";
 import { LogStream } from "./panels/LogStream";
@@ -37,22 +38,33 @@ export default function App() {
 
 	return (
 		<div className="flex h-screen flex-col bg-background text-foreground">
-			<Tabs
-				value={active}
-				onValueChange={(v) => {
-					window.location.hash = v;
-				}}
-				className="shrink-0 border-b"
-			>
-				<TabsList variant="line" className="px-4">
-					{tabs.map((tab) => (
-						<TabsTrigger key={tab.id} value={tab.id}>
-							<tab.icon className="h-4 w-4" />
-							{tab.label}
-						</TabsTrigger>
-					))}
-				</TabsList>
-			</Tabs>
+			<div className="flex shrink-0 items-center border-b">
+				<Tabs
+					value={active}
+					onValueChange={(v) => {
+						window.location.hash = v;
+					}}
+					className="flex-1"
+				>
+					<TabsList variant="line" className="px-4">
+						{tabs.map((tab) => (
+							<TabsTrigger key={tab.id} value={tab.id}>
+								<tab.icon className="h-4 w-4" />
+								{tab.label}
+							</TabsTrigger>
+						))}
+					</TabsList>
+				</Tabs>
+				<Button
+					variant="ghost"
+					size="icon-xs"
+					onClick={clear}
+					title="Clear all"
+					className="mr-3 text-muted-foreground"
+				>
+					<Trash2 />
+				</Button>
+			</div>
 			<div className={cn("flex-1", active === "logs" || active === "graph" || active === "state" ? "overflow-hidden" : "dev-scrollbar overflow-auto p-4")}>
 				{active === "graph" && <GraphView entries={entries} />}
 				{active === "logs" && (

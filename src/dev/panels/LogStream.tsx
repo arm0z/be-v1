@@ -11,7 +11,7 @@ import {
 	Play,
 	Search,
 	SlidersHorizontal,
-	Trash2,
+
 	X,
 } from "lucide-react";
 import {
@@ -251,7 +251,6 @@ function LogToolbar({
 	paused,
 	onTogglePause,
 	count,
-	onClear,
 	filtered,
 	filter,
 	setEventFilter,
@@ -261,7 +260,6 @@ function LogToolbar({
 	paused: boolean;
 	onTogglePause: () => void;
 	count: number;
-	onClear: () => void;
 	filtered: DevEntry[];
 	filter: DevFilter | null;
 	setEventFilter: (events: Partial<Record<string, boolean>>) => void;
@@ -343,17 +341,6 @@ function LogToolbar({
 
 			{/* Copy options dropdown */}
 			<CopyDropdown filtered={filtered} />
-
-			{/* Clear */}
-			<Button
-				variant="ghost"
-				size="xs"
-				onClick={onClear}
-				className="text-muted-foreground"
-			>
-				<Trash2 />
-				Clear
-			</Button>
 		</div>
 	);
 }
@@ -679,7 +666,6 @@ export function LogStream({ entries, onClear, filter, setEventFilter }: Props) {
 					paused={paused}
 					onTogglePause={togglePause}
 					count={filtered.length}
-					onClear={handleClear}
 					filtered={filtered}
 					filter={filter}
 					setEventFilter={setEventFilter}

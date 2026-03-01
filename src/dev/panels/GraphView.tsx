@@ -752,22 +752,21 @@ export function GraphView({ entries }: Props) {
 								const eUrl = urlsRef.current.get(e.to);
 								const eOrigin = eUrl ? extractOrigin(eUrl) : null;
 								return (
-									<div
-										key={`o-${e.to}`}
-										className="flex justify-between gap-2"
-									>
-										<span className="truncate text-muted-foreground">
-											<span className="text-blue-400">
-												&rarr;
-											</span>{" "}
-											{e.to}
-											{eOrigin && (
-												<span className="text-muted-foreground/50"> ({eOrigin})</span>
-											)}
-										</span>
-										<span className="shrink-0 tabular-nums">
-											&times;{e.weight}
-										</span>
+									<div key={`o-${e.to}`}>
+										<div className="flex justify-between gap-2">
+											<span className="truncate text-muted-foreground">
+												<span className="text-blue-400">
+													&rarr;
+												</span>{" "}
+												{e.to}
+											</span>
+											<span className="shrink-0 tabular-nums">
+												&times;{e.weight}
+											</span>
+										</div>
+										{eOrigin && (
+											<div className="truncate pl-4 text-muted-foreground/50">{eOrigin}</div>
+										)}
 									</div>
 								);
 							})}
@@ -780,22 +779,21 @@ export function GraphView({ entries }: Props) {
 								const eUrl = urlsRef.current.get(e.from);
 								const eOrigin = eUrl ? extractOrigin(eUrl) : null;
 								return (
-									<div
-										key={`i-${e.from}`}
-										className="flex justify-between gap-2"
-									>
-										<span className="truncate text-muted-foreground">
-											<span className="text-emerald-400">
-												&larr;
-											</span>{" "}
-											{e.from}
-											{eOrigin && (
-												<span className="text-muted-foreground/50"> ({eOrigin})</span>
-											)}
-										</span>
-										<span className="shrink-0 tabular-nums">
-											&times;{e.weight}
-										</span>
+									<div key={`i-${e.from}`}>
+										<div className="flex justify-between gap-2">
+											<span className="truncate text-muted-foreground">
+												<span className="text-emerald-400">
+													&larr;
+												</span>{" "}
+												{e.from}
+											</span>
+											<span className="shrink-0 tabular-nums">
+												&times;{e.weight}
+											</span>
+										</div>
+										{eOrigin && (
+											<div className="truncate pl-4 text-muted-foreground/50">{eOrigin}</div>
+										)}
 									</div>
 								);
 							})}
@@ -851,6 +849,14 @@ export function GraphView({ entries }: Props) {
 				</Tabs>
 				<div className="absolute right-2 top-2 flex gap-1">
 					<Button
+						variant={physicsOpen ? "default" : "outline"}
+						size="icon-xs"
+						onClick={() => setPhysicsOpen((o) => !o)}
+						title={physicsOpen ? "Close physics" : "Physics settings"}
+					>
+						<Settings2 />
+					</Button>
+					<Button
 						variant={dimMode ? "default" : "outline"}
 						size="icon-xs"
 						onClick={() => {
@@ -890,6 +896,56 @@ export function GraphView({ entries }: Props) {
 						<PanelRight />
 					</Button>
 				</div>
+				{physicsOpen && (
+					<div className="absolute bottom-2 left-2 z-10 w-56 rounded-lg border border-border/50 bg-popover/95 p-3 text-xs text-popover-foreground shadow-xl backdrop-blur-sm">
+						<div className="mb-2 font-semibold text-sm">Physics</div>
+						{([
+							{ label: "Repulsion", key: "chargeK" as const, min: 0, max: 3000, step: 50, def: DEFAULT_CHARGE_K },
+							{ label: "Spring", key: "springK" as const, min: 0, max: 0.1, step: 0.002, def: DEFAULT_SPRING_K },
+							{ label: "Rest length", key: "restLength" as const, min: 20, max: 400, step: 5, def: DEFAULT_REST_LENGTH },
+							{ label: "Centering", key: "centerK" as const, min: 0, max: 0.05, step: 0.001, def: DEFAULT_CENTER_K },
+							{ label: "Damping", key: "damping" as const, min: 0.5, max: 0.99, step: 0.01, def: DEFAULT_DAMPING },
+						]).map((p) => (
+							<div key={p.key} className="mt-1.5">
+								<div className="flex justify-between text-muted-foreground">
+									<span>{p.label}</span>
+									<span className="tabular-nums">{physics[p.key]}</span>
+								</div>
+								<input
+									type="range"
+									min={p.min}
+									max={p.max}
+									step={p.step}
+									value={physics[p.key]}
+									onChange={(e) => {
+										const v = Number(e.target.value);
+										physicsRef.current[p.key] = v;
+										setPhysics({ ...physicsRef.current });
+										awakeRef.current = true;
+									}}
+									className="mt-0.5 h-1 w-full cursor-pointer appearance-none rounded bg-border accent-blue-500"
+								/>
+							</div>
+						))}
+						<button
+							type="button"
+							className="mt-3 w-full rounded border border-border/50 px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+							onClick={() => {
+								physicsRef.current = {
+									chargeK: DEFAULT_CHARGE_K,
+									springK: DEFAULT_SPRING_K,
+									restLength: DEFAULT_REST_LENGTH,
+									centerK: DEFAULT_CENTER_K,
+									damping: DEFAULT_DAMPING,
+								};
+								setPhysics({ ...physicsRef.current });
+								awakeRef.current = true;
+							}}
+						>
+							Reset defaults
+						</button>
+					</div>
+				)}
 			</div>
 			{panelOpen && (
 				<div className="flex h-full w-72 shrink-0 flex-col border-l border-border bg-background" />

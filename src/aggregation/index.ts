@@ -79,6 +79,16 @@ export function createAggregator(): Aggregator {
     }
 
     function ingestSignal(signal: Signal, tabId: string): void {
+        if (tabId === "unknown") {
+            const currentSource = bundler.getActiveSource();
+            if (currentSource) {
+                const stamped = { ...signal, tabId, source: currentSource };
+                bundler.ingestSignal(stamped);
+                emitState();
+            }
+            return;
+        }
+
         const source = tabSources.get(tabId);
 
         if (!source) {
@@ -113,6 +123,11 @@ export function createAggregator(): Aggregator {
         if (signal.type === "tab.closed") {
             tabSources.delete(tabId);
             pendingSignals.delete(tabId);
+            for (const [windowId, activeTabId] of activeTabPerWindow.entries()) {
+                if (activeTabId === tabId) {
+                    activeTabPerWindow.delete(windowId);
+                }
+            }
         }
         emitState();
     }
@@ -185,14 +200,19 @@ export function createAggregator(): Aggregator {
         emitState();
     }
 
+    function onWindowRemoved(windowId: number): void {
+        activeTabPerWindow.delete(windowId);
+    }
+
     return {
         ingest,
         ingestSignal,
         onTabActivated,
         onWindowFocusChanged,
+        onWindowRemoved,
         getSealed: bundler.getSealed,
         getEdges: graph.getEdges,
         drainSealed: bundler.drainSealed,
-        drainEdges: graph.drainEdges,
+        drainEdges: () => { bundler.commitPending(); return graph.drainEdges(); },
     };
 }
