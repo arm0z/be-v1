@@ -1,7 +1,7 @@
 import type { Capture, Signal } from "../event/types.ts";
-import { OFF_BROWSER } from "./types.ts";
 
 import type { Aggregator } from "./types.ts";
+import { OFF_BROWSER } from "./types.ts";
 import { createBundler } from "./bundler.ts";
 import { createGraph } from "./graph.ts";
 import { dev } from "../event/dev.ts";
@@ -29,7 +29,7 @@ export function createAggregator(): Aggregator {
         { signal: Signal; tabId: string }[]
     >();
     let offBrowserTimer: ReturnType<typeof setTimeout> | null = null;
-    const OFF_BROWSER_SETTLE_MS = 500;
+    const OFF_BROWSER_SETTLE_MS = 1000;
 
     let visibleTabId: string | null = null;
 
@@ -138,10 +138,18 @@ export function createAggregator(): Aggregator {
 
     function startOffBrowserTimer(): void {
         if (offBrowserTimer !== null) clearTimeout(offBrowserTimer);
-        dev.log("navigation", "off_browser.start", `off-browser timer started (${OFF_BROWSER_SETTLE_MS}ms)`);
+        dev.log(
+            "navigation",
+            "off_browser.start",
+            `off-browser timer started (${OFF_BROWSER_SETTLE_MS}ms)`,
+        );
         offBrowserTimer = setTimeout(() => {
             offBrowserTimer = null;
-            dev.log("navigation", "off_browser.commit", "transitioning to off_browser");
+            dev.log(
+                "navigation",
+                "off_browser.commit",
+                "transitioning to off_browser",
+            );
             bundler.transition(OFF_BROWSER);
             emitState();
         }, OFF_BROWSER_SETTLE_MS);
@@ -152,12 +160,21 @@ export function createAggregator(): Aggregator {
             if (offBrowserTimer !== null) {
                 clearTimeout(offBrowserTimer);
                 offBrowserTimer = null;
-                dev.log("navigation", "off_browser.cancel", "off-browser timer cancelled");
+                dev.log(
+                    "navigation",
+                    "off_browser.cancel",
+                    "off-browser timer cancelled",
+                );
             }
             visibleTabId = tabId;
             const source = resolveSource(tabId);
             if (source === bundler.getActiveSource()) return;
-            dev.log("navigation", "tab.visible", `tab ${tabId} visible → ${source}`, { tabId, source });
+            dev.log(
+                "navigation",
+                "tab.visible",
+                `tab ${tabId} visible → ${source}`,
+                { tabId, source },
+            );
             bundler.transition(source);
             emitState();
         } else {
@@ -174,6 +191,9 @@ export function createAggregator(): Aggregator {
         getSealed: bundler.getSealed,
         getEdges: graph.getEdges,
         drainSealed: bundler.drainSealed,
-        drainEdges: () => { bundler.commitPending(); return graph.drainEdges(); },
+        drainEdges: () => {
+            bundler.commitPending();
+            return graph.drainEdges();
+        },
     };
 }

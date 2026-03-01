@@ -19,15 +19,23 @@ Steps 1–3 complete. The aggregator's `emitState()` now logs `transitions: Tran
 ### Current `DevStateSnapshot` type
 
 ```typescript
+export type DevCaptureSummary = { type: string; timestamp: number };
+
 export type DevStateSnapshot = {
     activeSource: string | null;
-    openBundle: { source: string; startedAt: number; captureCount: number } | null;
+    openBundle: {
+        source: string;
+        startedAt: number;
+        captureCount: number;
+        captures: DevCaptureSummary[];
+    } | null;
     sealedBundles: {
         source: string;
         startedAt: number;
         endedAt: number | null;
         captureCount: number;
         text: string | null;
+        captures: DevCaptureSummary[];
     }[];
     edges: { from: string; to: string; weight: number }[];
     urls: Record<string, string>;
@@ -36,18 +44,24 @@ export type DevStateSnapshot = {
 
 ### Change
 
-Replace the `edges` and `urls` fields with `transitions`:
+Replace the `edges` and `urls` fields with `transitions`. Preserve captures arrays:
 
 ```typescript
 export type DevStateSnapshot = {
     activeSource: string | null;
-    openBundle: { source: string; startedAt: number; captureCount: number } | null;
+    openBundle: {
+        source: string;
+        startedAt: number;
+        captureCount: number;
+        captures: DevCaptureSummary[];
+    } | null;
     sealedBundles: {
         source: string;
         startedAt: number;
         endedAt: number | null;
         captureCount: number;
         text: string | null;
+        captures: DevCaptureSummary[];
     }[];
     transitions: { from: string; to: string; ts: number; dwellMs: number }[];
 };

@@ -91,12 +91,14 @@ Change from:
 return {
     ingest,
     ingestSignal,
-    onTabActivated,
-    onWindowFocusChanged,
+    onVisibilityChanged,
     getSealed: bundler.getSealed,
     getEdges: graph.getEdges,
     drainSealed: bundler.drainSealed,
-    drainEdges: graph.drainEdges,
+    drainEdges: () => {
+        bundler.commitPending();
+        return graph.drainEdges();
+    },
 };
 ```
 
@@ -105,8 +107,7 @@ to:
 return {
     ingest,
     ingestSignal,
-    onTabActivated,
-    onWindowFocusChanged,
+    onVisibilityChanged,
     getSealed: bundler.getSealed,
     drainSealed: bundler.drainSealed,
     getTransitions: bundler.getTransitions,
@@ -115,25 +116,47 @@ return {
 };
 ```
 
+**Note:** The current `drainEdges` wrapper calls `bundler.commitPending()` before `graph.drainEdges()`. When removing both, this implicit dependency is gone — the new transition log has no pending state to commit.
+
 ## What the `emitState()` data shape becomes
 
-Before:
+Before (actual current code):
 ```typescript
 {
     activeSource: bundler.getActiveSource(),
-    openBundle: bundler.getOpenBundle(),
-    sealedBundles: [...],
+    openBundle: bundler.getOpenBundle(),   // includes captures: { type, timestamp }[]
+    sealedBundles: bundler.getSealed().map((b) => ({
+        source: b.source,
+        startedAt: b.startedAt,
+        endedAt: b.endedAt,
+        captureCount: b.captures.length,
+        text: b.text,
+        captures: b.captures.map((c) => ({
+            type: c.type,
+            timestamp: c.timestamp,
+        })),
+    })),
     edges: graph.getEdges(),     // Edge[]
     urls: graph.getUrls(),       // Record<string, string>
 }
 ```
 
-After:
+After (replace `edges`/`urls` with `transitions`, preserve captures):
 ```typescript
 {
     activeSource: bundler.getActiveSource(),
-    openBundle: bundler.getOpenBundle(),
-    sealedBundles: [...],
+    openBundle: bundler.getOpenBundle(),   // includes captures: { type, timestamp }[]
+    sealedBundles: bundler.getSealed().map((b) => ({
+        source: b.source,
+        startedAt: b.startedAt,
+        endedAt: b.endedAt,
+        captureCount: b.captures.length,
+        text: b.text,
+        captures: b.captures.map((c) => ({
+            type: c.type,
+            timestamp: c.timestamp,
+        })),
+    })),
     transitions: bundler.getTransitions(),  // Transition[]
 }
 ```

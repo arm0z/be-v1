@@ -29,7 +29,6 @@ const EVENT_GROUPS: { label: string; events: string[] }[] = [
 		events: [
 			"attention.active",
 			"attention.visible",
-			"attention.idle",
 		],
 	},
 	{
@@ -75,7 +74,7 @@ const EVENT_GROUPS: { label: string; events: string[] }[] = [
 	},
 	{
 		label: "ADAPTERS",
-		events: ["html.content", "file.content"],
+		events: ["html.content", "file.content", "filtered"],
 	},
 	{
 		label: "AGGREGATOR",
@@ -86,15 +85,9 @@ const EVENT_GROUPS: { label: string; events: string[] }[] = [
 		events: ["edge.created", "edge.incremented", "url.updated"],
 	},
 	{
-		label: "GRAPH NAVIGATION",
+		label: "TRANSITIONS",
 		events: [
-			"chrome.tab_activated",
-			"chrome.window_focus",
-			"tab.resolved",
-			"tab.spurious",
-			"tab.override_settle",
-			"window.resolved",
-			"window.no_tab",
+			"tab.visible",
 			"off_browser.start",
 			"off_browser.cancel",
 			"off_browser.commit",

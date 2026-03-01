@@ -125,8 +125,7 @@ export type DevChannel = "tap" | "adapter" | "normalizer" | "relay" | "aggregato
 Verify that the `Aggregator` type in `types.ts` matches what `createAggregator()` actually returns. The return object should have exactly these methods:
 - `ingest`
 - `ingestSignal`
-- `onTabActivated`
-- `onWindowFocusChanged`
+- `onVisibilityChanged`
 - `getSealed`
 - `drainSealed`
 - `getTransitions`

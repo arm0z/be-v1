@@ -880,8 +880,7 @@ export type Packet = {
 export type Aggregator = {
     ingest(capture: Capture, tabId: string): void;
     ingestSignal(signal: Signal, tabId: string): void;
-    onTabActivated(tabId: string, windowId: number): void;
-    onWindowFocusChanged(windowId: number): void;
+    onVisibilityChanged(tabId: string, visible: boolean): void;
 
     getSealed(): Bundle[];
     drainSealed(): Bundle[];
@@ -898,7 +897,7 @@ export type Aggregator = {
 
 ### `src/aggregation/bundler.ts` — transition log
 
-The bundler currently calls `graph.recordEdge(from, to)` on every transition. Replace that with an internal transition log. The bundler no longer takes a `graph` parameter.
+The bundler currently calls `graph.recordEdge(from, to)` on every transition and has complex dwell logic (`graphCursor`, `pendingEdge`, `dwellTimer`, `commitPending()`, `moveCursor()`). Replace all of that with a simple internal transition log. The bundler no longer takes a `graph` parameter. Dwell-based transient filtering moves to `preprocess.ts`.
 
 ```typescript
 import type { Transition, StampedCapture, StampedSignal, Bundle } from "./types.ts";
@@ -910,14 +909,16 @@ export function createBundler() {
     const transitions: Transition[] = [];
 
     function transition(to: string): void {
-        seal();
         const from = activeSource;
+        seal();
         if (from) {
-            const dwellMs = openBundle
-                ? (openBundle.endedAt ?? Date.now()) - openBundle.startedAt
+            const lastSealed = sealed[sealed.length - 1];
+            const dwellMs = lastSealed
+                ? lastSealed.endedAt! - lastSealed.startedAt
                 : 0;
             transitions.push({ from, to, ts: Date.now(), dwellMs });
         }
+        dev.log("aggregator", "transition", `${from ?? "∅"} → ${to}`, { from, to });
         activeSource = to;
         if (to !== UNKNOWN && to !== OFF_BROWSER) {
             openNew(to);
@@ -946,7 +947,7 @@ export function createBundler() {
 }
 ```
 
-**Key change:** `dwellMs` is computed from the bundle that just got sealed — `endedAt - startedAt`. The bundle is sealed *before* the transition is recorded, so `openBundle.endedAt` is set.
+**Key change:** `dwellMs` is computed from the sealed bundle's `endedAt - startedAt`. We capture `from` before calling `seal()`, then read the last sealed bundle after `seal()` completes. All dwell machinery (`graphCursor`, `pendingEdge`, `dwellTimer`, `DWELL_MS`, `commitPending()`, `moveCursor()`) is removed — transient filtering is handled by `preprocess.ts`.
 
 ### `src/aggregation/index.ts` — aggregator facade
 
@@ -955,13 +956,12 @@ The aggregator facade adds `getTransitions`, `drainTransitions`, and `seal` to i
 ```typescript
 export function createAggregator(): Aggregator {
     const bundler = createBundler();
-    // ... existing ingest, ingestSignal, onTabActivated, onWindowFocusChanged ...
+    // ... existing ingest, ingestSignal, onVisibilityChanged ...
 
     return {
         ingest,
         ingestSignal,
-        onTabActivated,
-        onWindowFocusChanged,
+        onVisibilityChanged,
         getSealed: bundler.getSealed,
         drainSealed: bundler.drainSealed,
         getTransitions: bundler.getTransitions,

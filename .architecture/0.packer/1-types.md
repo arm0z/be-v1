@@ -37,8 +37,7 @@ export type Edge = {
 export type Aggregator = {
     ingest(capture: Capture, tabId: string): void;
     ingestSignal(signal: Signal, tabId: string): void;
-    onTabActivated(tabId: string, windowId: number): void;
-    onWindowFocusChanged(windowId: number): void;
+    onVisibilityChanged(tabId: string, visible: boolean): void;
     getSealed(): Bundle[];
     getEdges(): Edge[];
     drainSealed(): Bundle[];
@@ -138,8 +137,7 @@ Replace the existing `Aggregator` type with:
 export type Aggregator = {
     ingest(capture: Capture, tabId: string): void;
     ingestSignal(signal: Signal, tabId: string): void;
-    onTabActivated(tabId: string, windowId: number): void;
-    onWindowFocusChanged(windowId: number): void;
+    onVisibilityChanged(tabId: string, visible: boolean): void;
 
     getSealed(): Bundle[];
     drainSealed(): Bundle[];
@@ -160,6 +158,7 @@ export type Aggregator = {
 - ADDED: `getTransitions(): Transition[]`
 - ADDED: `drainTransitions(): Transition[]`
 - ADDED: `seal(): void`
+- UNCHANGED: `onVisibilityChanged(tabId: string, visible: boolean): void`
 
 ## Expected final file
 
