@@ -231,237 +231,94 @@ function EdgeTable({ transitions, grouped, louvain, sourceUrls }: EdgeTableProps
         }
     }
 
-    // --- Grouped mode: show edges grouped by community ---
+    // --- Grouped mode: same layout as raw, but with community colors ---
     if (grouped && louvain) {
         const uniqueCommunities = [...new Set(louvain.communities.values())];
 
-        // Group edges by community pair
-        type CommunityEdge = Edge & {
-            fromCommunity: string;
-            toCommunity: string;
-        };
-        const communityEdges: CommunityEdge[] = [];
-        for (const [, edge] of aggregated) {
-            const fromC = louvain.communities.get(edge.from) ?? "?";
-            const toC = louvain.communities.get(edge.to) ?? "?";
-            communityEdges.push({
-                ...edge,
-                fromCommunity: fromC,
-                toCommunity: toC,
-            });
-        }
-
-        // Group: intra-community first, then inter-community
-        const intra = communityEdges.filter(
-            (e) => e.fromCommunity === e.toCommunity,
-        );
-        const inter = communityEdges.filter(
-            (e) => e.fromCommunity !== e.toCommunity,
-        );
-
-        // Sort intra by community, then by weight desc
-        intra.sort(
-            (a, b) =>
-                a.fromCommunity.localeCompare(b.fromCommunity) ||
-                b.weight - a.weight,
-        );
-        inter.sort((a, b) => b.weight - a.weight);
-
-        // Group intra edges by community
-        const byCommunity = new Map<string, CommunityEdge[]>();
-        for (const e of intra) {
-            let arr = byCommunity.get(e.fromCommunity);
-            if (!arr) {
-                arr = [];
-                byCommunity.set(e.fromCommunity, arr);
-            }
-            arr.push(e);
+        function communityColor(id: string): string {
+            const community = louvain!.communities.get(id);
+            return community
+                ? getCommunityColor(community, uniqueCommunities)
+                : "hsl(0,0%,45%)";
         }
 
         return (
             <div className="dev-scrollbar flex h-full flex-col overflow-y-auto">
-                {/* Nodes summary */}
+                {/* Nodes strip */}
                 <div className="flex flex-wrap gap-1.5 border-b border-border/50 px-3 py-2">
-                    {[...nodeSet].map((id) => {
-                        const community = louvain.communities.get(id);
-                        const color = community
-                            ? getCommunityColor(community, uniqueCommunities)
-                            : "hsl(0,0%,45%)";
-                        return (
+                    {[...nodeSet].map((id) => (
+                        <span
+                            key={id}
+                            className="inline-flex items-center gap-1 rounded-full border border-border/50 px-2 py-0.5 text-[11px]"
+                        >
                             <span
-                                key={id}
-                                className="inline-flex items-center gap-1 rounded-full border border-border/50 px-2 py-0.5 text-[11px]"
-                            >
-                                <span
-                                    className="inline-block size-2 shrink-0 rounded-full"
-                                    style={{ backgroundColor: color }}
-                                />
-                                <SourceCell id={id} urls={sourceUrls} />
-                            </span>
-                        );
-                    })}
+                                className="inline-block size-2 shrink-0 rounded-full"
+                                style={{ backgroundColor: communityColor(id) }}
+                            />
+                            <SourceCell id={id} urls={sourceUrls} />
+                        </span>
+                    ))}
                 </div>
 
-                {/* Intra-community edges */}
-                {[...byCommunity.entries()].map(([communityId, cedges]) => {
-                    const color = getCommunityColor(
-                        communityId,
-                        uniqueCommunities,
-                    );
-                    const members = [...louvain.communities.entries()]
-                        .filter(([, c]) => c === communityId)
-                        .map(([n]) => n);
-                    return (
-                        <div key={communityId}>
-                            <div className="flex items-center gap-2 border-b border-border/30 bg-muted/30 px-3 py-1.5">
-                                <span
-                                    className="inline-block size-2.5 rounded-full"
-                                    style={{ backgroundColor: color }}
-                                />
-                                <span className="text-xs font-medium">
-                                    Community
-                                </span>
-                                <span className="text-[10px] text-muted-foreground">
-                                    {members.length} nodes
-                                </span>
-                            </div>
-                            <table className="w-full text-xs">
-                                <thead>
-                                    <tr className="border-b border-border/30 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-                                        <th className="px-3 py-1 font-medium">
-                                            From
-                                        </th>
-                                        <th className="px-1 py-1 font-medium" />
-                                        <th className="px-3 py-1 font-medium">
-                                            To
-                                        </th>
-                                        <th className="px-3 py-1 text-right font-medium">
-                                            Weight
-                                        </th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {cedges.map((e, i) => (
-                                        <tr
-                                            key={i}
-                                            className="border-b border-border/20 hover:bg-muted/20"
-                                        >
-                                            <td className="px-3 py-1.5">
-                                                <span className="inline-flex items-center gap-1.5">
-                                                    <span
-                                                        className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
-                                                        style={{
-                                                            backgroundColor:
-                                                                color,
-                                                        }}
-                                                    />
-                                                    <SourceCell id={e.from} urls={sourceUrls} />
-                                                </span>
-                                            </td>
-                                            <td className="px-1 py-1.5 text-muted-foreground">
-                                                &rarr;
-                                            </td>
-                                            <td className="px-3 py-1.5">
-                                                <span className="inline-flex items-center gap-1.5">
-                                                    <span
-                                                        className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
-                                                        style={{
-                                                            backgroundColor:
-                                                                color,
-                                                        }}
-                                                    />
-                                                    <SourceCell id={e.to} urls={sourceUrls} />
-                                                </span>
-                                            </td>
-                                            <td className="px-3 py-1.5 text-right tabular-nums">
-                                                {e.weight}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    );
-                })}
-
-                {/* Inter-community edges */}
-                {inter.length > 0 && (
-                    <div>
-                        <div className="flex items-center gap-2 border-b border-border/30 bg-muted/30 px-3 py-1.5">
-                            <span className="text-xs font-medium text-muted-foreground">
-                                Cross-community
-                            </span>
-                            <span className="text-[10px] text-muted-foreground">
-                                {inter.length} edges
-                            </span>
-                        </div>
-                        <table className="w-full text-xs">
-                            <thead>
-                                <tr className="border-b border-border/30 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-                                    <th className="px-3 py-1 font-medium">
-                                        From
-                                    </th>
-                                    <th className="px-1 py-1 font-medium" />
-                                    <th className="px-3 py-1 font-medium">
-                                        To
-                                    </th>
-                                    <th className="px-3 py-1 text-right font-medium">
-                                        Weight
-                                    </th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {inter.map((e, i) => {
-                                    const fromColor = getCommunityColor(
-                                        e.fromCommunity,
-                                        uniqueCommunities,
-                                    );
-                                    const toColor = getCommunityColor(
-                                        e.toCommunity,
-                                        uniqueCommunities,
-                                    );
-                                    return (
-                                        <tr
-                                            key={i}
-                                            className="border-b border-border/20 hover:bg-muted/20"
-                                        >
-                                            <td className="px-3 py-1.5">
-                                                <span className="inline-flex items-center gap-1.5">
-                                                    <span
-                                                        className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
-                                                        style={{
-                                                            backgroundColor:
-                                                                fromColor,
-                                                        }}
-                                                    />
-                                                    <SourceCell id={e.from} urls={sourceUrls} />
-                                                </span>
-                                            </td>
-                                            <td className="px-1 py-1.5 text-muted-foreground">
-                                                &rarr;
-                                            </td>
-                                            <td className="px-3 py-1.5">
-                                                <span className="inline-flex items-center gap-1.5">
-                                                    <span
-                                                        className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
-                                                        style={{
-                                                            backgroundColor:
-                                                                toColor,
-                                                        }}
-                                                    />
-                                                    <SourceCell id={e.to} urls={sourceUrls} />
-                                                </span>
-                                            </td>
-                                            <td className="px-3 py-1.5 text-right tabular-nums">
-                                                {e.weight}
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
+                <table className="w-full text-xs">
+                    <thead className="sticky top-0 z-10 bg-background">
+                        <tr className="border-b border-border/50 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                            <th className="px-3 py-1.5 font-medium">#</th>
+                            <th className="px-3 py-1.5 font-medium">From</th>
+                            <th className="px-1 py-1.5 font-medium" />
+                            <th className="px-3 py-1.5 font-medium">To</th>
+                            <th className="px-3 py-1.5 text-right font-medium">
+                                Dwell
+                            </th>
+                            <th className="px-3 py-1.5 text-right font-medium">
+                                Time
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {transitions.map((t, i) => (
+                            <tr
+                                key={i}
+                                className="border-b border-border/20 hover:bg-muted/20"
+                            >
+                                <td className="px-3 py-1.5 tabular-nums text-muted-foreground">
+                                    {i + 1}
+                                </td>
+                                <td className="px-3 py-1.5">
+                                    <span className="inline-flex items-center gap-1.5">
+                                        <span
+                                            className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
+                                            style={{
+                                                backgroundColor: communityColor(t.from),
+                                            }}
+                                        />
+                                        <SourceCell id={t.from} urls={sourceUrls} />
+                                    </span>
+                                </td>
+                                <td className="px-1 py-1.5 text-muted-foreground">
+                                    &rarr;
+                                </td>
+                                <td className="px-3 py-1.5">
+                                    <span className="inline-flex items-center gap-1.5">
+                                        <span
+                                            className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
+                                            style={{
+                                                backgroundColor: communityColor(t.to),
+                                            }}
+                                        />
+                                        <SourceCell id={t.to} urls={sourceUrls} />
+                                    </span>
+                                </td>
+                                <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                                    {fmtDwell(t.dwellMs)}
+                                </td>
+                                <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                                    {fmtTime(t.ts)}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
             </div>
         );
     }
@@ -803,6 +660,7 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                     vy: 0,
                     firstSeen: 0,
                     lastSeen: 0,
+                    url: latestSnapshot.sourceUrls[nodeId],
                 });
             }
 
@@ -819,7 +677,7 @@ export function GraphView({ entries, onClear, onSend }: Props) {
         if (activeTab === "raw") {
             processedRef.current = 0;
         }
-    }, [activeTab, groupedResult]);
+    }, [activeTab, groupedResult, latestSnapshot.sourceUrls]);
 
     // --- force simulation ---
     const tick = useCallback(() => {
