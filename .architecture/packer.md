@@ -1,6 +1,6 @@
 # Packer
 
-The Packer is the final stage of the Aggregation Layer. It consumes sealed Bundles and navigation graph edges from the Bundler and Graph, partitions sources into Groups, and assembles Packets for delivery to the Syncing Layer.
+The Packer is the final stage of the Aggregation Layer. It consumes sealed Bundles and raw Transitions from the Bundler, preprocesses transitions to remove noise, builds a directed graph, runs Louvain community detection to partition sources into Groups, and assembles Packets for delivery to the Syncing Layer.
 
 ## Where it sits
 
@@ -9,23 +9,24 @@ Service Worker
 ──────────────
   ┌─ Aggregation Layer ────────────────────────────────────────────┐
   │                                                                │
-  │   ┌──────────┐         ┌──────────┐                            │
-  │   │ Bundler  │         │  Graph   │                            │
-  │   │          │         │          │                            │
-  │   │ sealed[] ├────┐    │ edges[]  ├────┐                       │
-  │   └──────────┘    │    └──────────┘    │                       │
-  │                   │                    │                       │
-  │                   ▼                    ▼                       │
+  │   ┌──────────────────┐                                         │
+  │   │     Bundler      │                                         │
+  │   │                  │                                         │
+  │   │  sealed[]        ├────┐                                    │
+  │   │  transitions[]   ├────┤                                    │
+  │   └──────────────────┘    │                                    │
+  │                           ▼                                    │
   │             ┌───────────────────────────────┐                  │
   │             │           Packer              │                  │
   │             │                               │                  │
-  │             │  1. drain sealed bundles      │                  │
-  │             │  2. drain edges               │                  │
-  │             │  3. partition → Groups        │                  │
-  │             │  4. assign bundles → Groups   │                  │
-  │             │  5. compute GroupMeta         │                  │
-  │             │  6. translate group text      │                  │
-  │             │  7. assemble Packet           │                  │
+  │             │  1. seal + drain bundles      │                  │
+  │             │  2. drain transitions         │                  │
+  │             │  3. preprocess transitions    │                  │
+  │             │  4. build directed graph      │                  │
+  │             │  5. Louvain → communities     │                  │
+  │             │  6. assign bundles → Groups   │                  │
+  │             │  7. compute GroupMeta         │                  │
+  │             │  8. assemble Packet           │                  │
   │             │                               │                  │
   │             └──────────────┬────────────────┘                  │
   │                            │                                   │
@@ -38,7 +39,7 @@ Service Worker
                     └─────────────────────┘
 ```
 
-The Packer has no knowledge of Chrome APIs, Captures, or the DOM. It only operates on sealed Bundles (which already have `text` populated by `translate()`) and Edges (directed, weighted connections between sources).
+The Packer has no knowledge of Chrome APIs, Captures, or the DOM. It only operates on sealed Bundles (which already have `text` populated by `translate()`) and raw Transitions (timestamped focus-shift records logged by the Bundler). The directed graph and edge weights are built internally by the Packer at flush time.
 
 ## Types
 
@@ -154,15 +155,15 @@ Based on "Graph-Structure-Based Grouping of Web Browser Tabs into Tasks" (Hisato
 - **No training data** — unsupervised, no manual annotation.
 - **The signal already exists** — the Bundler's `transition()` fires on every source change. We just need to store the raw records instead of pre-aggregating them.
 
-### Aggregator assumption
+### Aggregator transition log
 
-> **The aggregator must be rewritten.** The current `createGraph()` pre-aggregates transitions into `Edge { from, to, weight }`, discarding timestamps and dwell times. The graph partitioning algorithm needs per-transition timing for:
+> **Implemented.** The old `createGraph()` pre-aggregation has been replaced with a raw transition log. Each call to `bundler.transition(to)` in [`src/aggregation/bundler.ts`](../src/aggregation/bundler.ts) appends a `Transition { from, to, ts, dwellMs }` record. The Packer builds the `DirectedGraph` from raw transitions after preprocessing at flush time. Per-transition timing enables:
 >
-> - **Transient detection** — filtering transitions where dwell < 500ms
-> - **Hub temporal chunking** — splitting hub sources into 5-minute time windows requires knowing *when* each transition happened
-> - **Chain scanning** — detecting rapid Ctrl+Tab sequences requires consecutive transition timing
+> - **Transient detection** — filtering transitions where dwell < 500ms ([`preprocess.ts`](../src/aggregation/preprocess.ts) `removeTransients()`)
+> - **Hub temporal chunking** — splitting hub sources into dynamic time windows ([`preprocess.ts`](../src/aggregation/preprocess.ts) `chunkHubs()`)
+> - **Chain scanning** — detecting rapid Ctrl+Tab sequences from consecutive transition timing ([`preprocess.ts`](../src/aggregation/preprocess.ts) `removeTransients()`)
 >
-> The aggregator should replace `createGraph()` with a simple transition log. Each call to `bundler.transition(to)` appends a `Transition` record instead of incrementing an edge weight. The packer builds the `DirectedGraph` from raw transitions after preprocessing.
+> The old `graph.ts` module has been deleted. `getEdges`/`drainEdges` are removed from the `Aggregator` interface, replaced by `getTransitions()`/`drainTransitions()`/`seal()`.
 
 ### Input data
 
@@ -499,6 +500,7 @@ A single hub source can contribute bundles to **multiple** Groups. The bundle's 
 | `SENTINEL_PASSTHROUGH_MS` | 2s         | Off-browser stints shorter than this become pass-through edges      |
 | `SENTINEL_BREAK_MS`       | 10 min     | Off-browser stints longer than this are severed (break boundary)    |
 | `TRANSIENT_DWELL_MS`      | 500ms      | Transitions with dwell shorter than this mark a source as transient |
+| `TRANSIENT_CHAIN_MS`      | 1s         | Chain scanning threshold — 3+ consecutive transitions below this    |
 | `HUB_THRESHOLD_PERCENT`   | 0.1 (10%)  | Neighbor ratio to flag a source as hub                              |
 | `HUB_MIN_SOURCES`         | 15         | Minimum source count before hub detection activates                 |
 | `TARGET_PER_CHUNK`        | 4          | Target transitions per chunk — drives dynamic window sizing         |
@@ -977,9 +979,9 @@ The preprocessing pipeline. Single entry point, internal helpers for each stage.
 
 ```typescript
 import type { Transition, PreprocessResult, ChunkInfo } from "./types.ts";
-import { UNKNOWN, OFF_BROWSER } from "./types.ts";
+import { OFF_BROWSER } from "./types.ts";
 
-// ── Constants ──────────────────────────────────────────────
+// ── Constants (defaults) ────────────────────────────────────
 
 const SENTINEL_PASSTHROUGH_MS = 2_000;
 const SENTINEL_BREAK_MS = 600_000;       // 10 minutes
@@ -991,6 +993,34 @@ const TARGET_PER_CHUNK = 4;
 const MIN_CHUNK_MS = 60_000;             // 1 minute
 const MAX_CHUNK_MS = 900_000;            // 15 minutes
 
+// ── Options ─────────────────────────────────────────────────
+
+/**
+ * All preprocessing constants are overridable via PreprocessOptions.
+ * This is used by the DevHub grouped view (GraphView.tsx) for
+ * real-time parameter tuning. Production callers omit options
+ * to use the defaults above.
+ */
+export type PreprocessOptions = {
+    sentinelPassthroughMs?: number;
+    sentinelBreakMs?: number;
+    transientDwellMs?: number;
+    transientChainMs?: number;
+    hubThresholdPercent?: number;
+    hubMinSources?: number;
+    targetPerChunk?: number;
+    minChunkMs?: number;
+    maxChunkMs?: number;
+};
+
+/**
+ * Internal resolved options — all fields required.
+ * Built by resolveOptions() which merges caller overrides with defaults.
+ */
+type ResolvedOptions = Required<PreprocessOptions>;
+
+function resolveOptions(options?: PreprocessOptions): ResolvedOptions;
+
 // ── Public API ─────────────────────────────────────────────
 
 /**
@@ -999,61 +1029,78 @@ const MAX_CHUNK_MS = 900_000;            // 15 minutes
  *
  * Returns the rewritten transition list and metadata needed for
  * bundle assignment after Louvain.
+ *
+ * @param raw       Raw transitions from drainTransitions().
+ * @param options   Optional overrides for all preprocessing constants.
+ *                  Omit for production defaults. Used by DevHub for tuning.
  */
-export function preprocess(transitions: Transition[]): PreprocessResult;
+export function preprocess(
+    raw: Transition[],
+    options?: PreprocessOptions,
+): PreprocessResult;
 
 // ── Internal helpers ───────────────────────────────────────
+// All helpers accept ResolvedOptions so constants flow from the caller.
 
 /**
  * Step 1: Rewrite off_browser transitions.
- * - < SENTINEL_PASSTHROUGH_MS → collapse to direct A→B edge
- * - < SENTINEL_BREAK_MS → replace with ephemeral off_browser:<n>
- * - ≥ SENTINEL_BREAK_MS → remove both (break boundary)
+ * - < sentinelPassthroughMs → collapse to direct A→B edge
+ * - < sentinelBreakMs → replace with ephemeral off_browser:<n>
+ * - ≥ sentinelBreakMs → remove both (break boundary)
  *
  * Returns { transitions, sentinelCount }.
  */
 function splitSentinels(
     transitions: Transition[],
+    opts: ResolvedOptions,
 ): { transitions: Transition[]; sentinelCount: number };
 
 /**
  * Step 2: Identify and remove transient sources.
  * A source is transient if:
- *   (a) all outgoing transitions have dwellMs < TRANSIENT_DWELL_MS, OR
- *   (b) it appears in a chain of 3+ consecutive transitions all < TRANSIENT_CHAIN_MS
+ *   (a) all outgoing transitions have dwellMs < transientDwellMs, OR
+ *   (b) it appears in a chain of 3+ consecutive transitions all < transientChainMs
  *
  * Returns { transitions, excludedSources }.
  */
 function removeTransients(
     transitions: Transition[],
+    opts: ResolvedOptions,
 ): { transitions: Transition[]; excludedSources: Set<string> };
 
 /**
  * Step 3: Detect hub sources.
  * A source is a hub if its unique neighbor count exceeds
- * HUB_THRESHOLD_PERCENT of all unique sources (when total ≥ HUB_MIN_SOURCES).
+ * hubThresholdPercent of all unique sources (when total ≥ hubMinSources).
  */
-function detectHubs(transitions: Transition[]): Set<string>;
+function detectHubs(
+    transitions: Transition[],
+    opts: ResolvedOptions,
+): Set<string>;
 
 /**
  * Step 4: Split each hub into temporal chunks with a dynamic window.
- * Rewrites transitions in-place, replacing hub source IDs with chunk IDs.
+ * Rewrites transitions, replacing hub source IDs with chunk IDs.
  *
- * Returns { transitions, chunkMap, hubSources }.
+ * Returns { transitions, chunkMap }.
  */
 function chunkHubs(
     transitions: Transition[],
     hubSources: Set<string>,
+    opts: ResolvedOptions,
 ): { transitions: Transition[]; chunkMap: Map<string, ChunkInfo> };
 
 /**
  * Compute the dynamic chunk window for a single hub.
  *
- *   idealChunks   = max(1, floor(connectionCount / TARGET_PER_CHUNK))
+ *   idealChunks   = max(1, floor(connectionCount / targetPerChunk))
  *   rawWindowMs   = sessionMs / idealChunks
- *   chunkWindowMs = clamp(rawWindowMs, MIN_CHUNK_MS, MAX_CHUNK_MS)
+ *   chunkWindowMs = clamp(rawWindowMs, minChunkMs, maxChunkMs)
  */
-function computeChunkWindow(hubTransitions: Transition[]): number;
+function computeChunkWindow(
+    hubTransitions: Transition[],
+    opts: ResolvedOptions,
+): number;
 ```
 
 ### `src/aggregation/directed-louvain.ts`
@@ -1128,13 +1175,13 @@ The packer itself. Stateless — reads from the aggregator, transforms, returns 
 
 ```typescript
 import type {
-    Aggregator, Bundle, Edge, Transition,
-    Group, GroupMeta, Packet, PreprocessResult,
-    LouvainResult, ChunkInfo,
+    Aggregator, Bundle, DirectedGraph, Edge,
+    Group, GroupMeta, LouvainResult, Packet,
+    PreprocessResult, Transition,
 } from "./types.ts";
-import { preprocess } from "./preprocess.ts";
 import { buildDirectedGraph, directedLouvain } from "./directed-louvain.ts";
 import { dev } from "../event/dev.ts";
+import { preprocess } from "./preprocess.ts";
 
 // ── Public API ─────────────────────────────────────────────
 
@@ -1230,21 +1277,22 @@ function flush(): Packet | null {
 }
 ```
 
-### Removing `createGraph()`
+### `createGraph()` removal
 
-`createGraph()` and `graph.ts` are deleted. The bundler drops its `graph` parameter and records only into the transition log. `getEdges`/`drainEdges` are removed from the `Aggregator` interface.
+`createGraph()` and `graph.ts` have been deleted. The bundler no longer takes a `graph` parameter — it records raw transitions into an internal `transitions: Transition[]` array. `getEdges`/`drainEdges` are removed from the `Aggregator` interface, replaced by `getTransitions()`/`drainTransitions()`/`seal()`.
 
-The DevHub graph view (`GraphView.tsx`) switches to building edges on-the-fly from the transition log via `buildDirectedGraph(aggregator.getTransitions())`. Since `getTransitions()` is a non-destructive read, the DevHub can poll it on every state update without interfering with the packer's `drainTransitions()` at flush time.
+The DevHub graph view ([`src/dev/panels/GraphView.tsx`](../src/dev/panels/GraphView.tsx)) builds edges on-the-fly from the transition log via `buildDirectedGraph()` and runs `directedLouvain()` for its grouped community visualization. It uses `preprocess()` with `PreprocessOptions` for real-time parameter tuning. Since `getTransitions()` is a non-destructive read, the DevHub can poll it on every state update without interfering with the packer's `drainTransitions()` at flush time.
 
 ## File map
 
 | File                                                              | Role                                                                                                                                                            |
 | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/aggregation/packer.ts`                                       | `createPacker(aggregator)` — `flush()`, `partitionIntoGroups()`, bundle assignment (not yet created)                                                            |
-| `src/aggregation/preprocess.ts`                                   | `preprocess()` — off-browser splitting, transient detection, hub detection + chunking (not yet created)                                                         |
-| `src/aggregation/directed-louvain.ts`                             | `directedLouvain()` — two-phase directed Louvain community detection (not yet created)                                                                          |
-| [`src/aggregation/index.ts`](../src/aggregation/index.ts)         | `createAggregator()` — facade; exposes transition log via `getTransitions`/`drainTransitions`                                                                   |
-| [`src/aggregation/bundler.ts`](../src/aggregation/bundler.ts)     | `createBundler()` — produces sealed Bundles and logs `Transition` records on each source change ([docs](./bundler.md))                                          |
-| ~~`src/aggregation/graph.ts`~~                                    | **Deleted.** Replaced by the transition log in the bundler; edges are built by `buildDirectedGraph()` in `directed-louvain.ts` at flush time                    |
-| [`src/aggregation/translate.ts`](../src/aggregation/translate.ts) | `translate(bundle)` — called at seal time by the bundler; packer uses the pre-computed `bundle.text` directly                                                   |
-| [`src/aggregation/types.ts`](../src/aggregation/types.ts)         | `Bundle`, `Transition`, `Edge`, `Group`, `GroupMeta`, `Packet`, `DirectedGraph`, `LouvainResult` definitions                                                    |
+| [`src/aggregation/packer.ts`](../src/aggregation/packer.ts)                   | `createPacker(aggregator)` — `flush()`, `partitionIntoGroups()`, `assignBundles()`, `makeGroup()`, `computeMeta()`, `graphToEdges()`                    |
+| [`src/aggregation/preprocess.ts`](../src/aggregation/preprocess.ts)           | `preprocess()` — off-browser splitting, transient detection, hub detection + chunking. Accepts optional `PreprocessOptions` for DevHub tuning            |
+| [`src/aggregation/directed-louvain.ts`](../src/aggregation/directed-louvain.ts) | `buildDirectedGraph()` + `directedLouvain()` — graph construction and two-phase directed Louvain community detection                                  |
+| [`src/aggregation/index.ts`](../src/aggregation/index.ts)                     | `createAggregator()` — facade; exposes transition log via `getTransitions`/`drainTransitions`/`seal`                                                    |
+| [`src/aggregation/bundler.ts`](../src/aggregation/bundler.ts)                 | `createBundler()` — produces sealed Bundles and logs `Transition` records on each source change ([docs](./bundler.md))                                  |
+| ~~`src/aggregation/graph.ts`~~                                                | **Deleted.** Replaced by the transition log in the bundler; edges are built by `buildDirectedGraph()` in `directed-louvain.ts` at flush time            |
+| [`src/aggregation/translate.ts`](../src/aggregation/translate.ts)             | `translate(bundle)` — called at seal time by the bundler; packer uses the pre-computed `bundle.text` directly                                           |
+| [`src/aggregation/types.ts`](../src/aggregation/types.ts)                     | `Bundle`, `Transition`, `Edge`, `Group`, `GroupMeta`, `Packet`, `DirectedGraph`, `LouvainResult`, `ChunkInfo`, `PreprocessResult`, `Aggregator`         |
+| [`src/background/main.ts`](../src/background/main.ts)                        | Wires packer with `chrome.alarms` flush trigger (every 5 min) and manual `dev:flush` handler                                                           |
