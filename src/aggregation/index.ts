@@ -13,11 +13,6 @@ export function createAggregator(): Aggregator {
         string,
         { signal: Signal; tabId: string }[]
     >();
-    let offBrowserTimer: ReturnType<typeof setTimeout> | null = null;
-    const OFF_BROWSER_SETTLE_MS = 1000;
-
-    let visibleTabId: string | null = null;
-    let offBrowserCb: ((offBrowser: boolean) => void) | null = null;
 
     function emitState() {
         dev.log("aggregator", "state.snapshot", "state", {
@@ -49,8 +44,17 @@ export function createAggregator(): Aggregator {
         }
     }
 
-    function resolveSource(tabId: string): string {
-        return tabSources.get(tabId) ?? `root@${tabId}`;
+    function resolveSource(tabId: string, url?: string): string {
+        const captured = tabSources.get(tabId);
+        if (captured) return captured;
+        if (url) {
+            try {
+                return `${new URL(url).hostname}@${tabId}`;
+            } catch {
+                // invalid URL, fall through
+            }
+        }
+        return `root@${tabId}`;
     }
 
     function ingest(capture: Capture, tabId: string): void {
@@ -119,74 +123,38 @@ export function createAggregator(): Aggregator {
         if (signal.type === "tab.closed") {
             tabSources.delete(tabId);
             pendingSignals.delete(tabId);
-            if (visibleTabId === tabId) {
-                visibleTabId = null;
-                startOffBrowserTimer();
-            }
         }
         emitState();
     }
 
-    function startOffBrowserTimer(): void {
-        if (offBrowserTimer !== null) clearTimeout(offBrowserTimer);
-        dev.log(
-            "navigation",
-            "off_browser.start",
-            `off-browser timer started (${OFF_BROWSER_SETTLE_MS}ms)`,
-        );
-        offBrowserTimer = setTimeout(() => {
-            offBrowserTimer = null;
+    function setActiveTab(tabId: string | null, url?: string): void {
+        if (tabId === null) {
+            if (bundler.getActiveSource() === OFF_BROWSER) return;
             dev.log(
                 "navigation",
-                "off_browser.commit",
+                "off_browser",
                 "transitioning to off_browser",
             );
             bundler.transition(OFF_BROWSER);
-            offBrowserCb?.(true);
             emitState();
-        }, OFF_BROWSER_SETTLE_MS);
-    }
-
-    function onVisibilityChanged(tabId: string, visible: boolean): void {
-        if (visible) {
-            const wasOffBrowser =
-                offBrowserTimer !== null ||
-                bundler.getActiveSource() === OFF_BROWSER;
-            if (offBrowserTimer !== null) {
-                clearTimeout(offBrowserTimer);
-                offBrowserTimer = null;
-                dev.log(
-                    "navigation",
-                    "off_browser.cancel",
-                    "off-browser timer cancelled",
-                );
-            }
-            if (wasOffBrowser) offBrowserCb?.(false);
-            visibleTabId = tabId;
-            const source = resolveSource(tabId);
-            if (source === bundler.getActiveSource()) return;
-            dev.log(
-                "navigation",
-                "tab.visible",
-                `tab ${tabId} visible → ${source}`,
-                { tabId, source },
-            );
-            bundler.transition(source);
-            emitState();
-        } else {
-            if (tabId !== visibleTabId) return;
-            visibleTabId = null;
-            startOffBrowserTimer();
+            return;
         }
+        const source = resolveSource(tabId, url);
+        if (source === bundler.getActiveSource()) return;
+        dev.log(
+            "navigation",
+            "tab.visible",
+            `tab ${tabId} visible → ${source}`,
+            { tabId, source, url },
+        );
+        bundler.transition(source);
+        emitState();
     }
 
     return {
         ingest,
         ingestSignal,
-        onVisibilityChanged,
-        onOffBrowser(cb: (offBrowser: boolean) => void) {
-            offBrowserCb = cb;
-        },
+        setActiveTab,
         getSealed: bundler.getSealed,
         drainSealed: bundler.drainSealed,
         getTransitions: bundler.getTransitions,

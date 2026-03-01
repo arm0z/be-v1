@@ -2,7 +2,9 @@ import {
     Boxes,
     Eclipse,
     Expand,
+    GitGraph,
     PanelRight,
+    Rows3,
     Scan,
     Settings2,
     Shrink,
@@ -104,6 +106,250 @@ function convexHull(points: [number, number][]): [number, number][] {
     return lower.concat(upper);
 }
 
+function fmtDwell(ms: number): string {
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+    return `${(ms / 60_000).toFixed(1)}m`;
+}
+
+function extractHostname(source: string): string {
+    const at = source.indexOf("@");
+    return at >= 0 ? source.slice(0, at) : source;
+}
+
+/** Consistent color for a node based on its source name. */
+function nodeColor(source: string): string {
+    let hash = 0;
+    for (let i = 0; i < source.length; i++) {
+        hash = ((hash << 5) - hash + source.charCodeAt(i)) | 0;
+    }
+    const hue = ((hash % 360) + 360) % 360;
+    if (source === "off_browser" || source === "unknown") return "hsl(0, 0%, 45%)";
+    return `hsl(${hue}, 65%, 55%)`;
+}
+
+type EdgeTableProps = {
+    transitions: Transition[];
+    grouped: boolean;
+    louvain: LouvainResult | null;
+};
+
+function EdgeTable({ transitions, grouped, louvain }: EdgeTableProps) {
+    if (transitions.length === 0) {
+        return (
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                No edge data yet — edges appear as transitions flow
+            </div>
+        );
+    }
+
+    // Aggregate transitions into edges
+    const aggregated = new Map<string, Edge>();
+    const nodeSet = new Set<string>();
+    for (const t of transitions) {
+        nodeSet.add(t.from);
+        nodeSet.add(t.to);
+        const key = `${t.from}->${t.to}`;
+        const existing = aggregated.get(key);
+        if (existing) {
+            existing.weight++;
+        } else {
+            aggregated.set(key, { from: t.from, to: t.to, weight: 1 });
+        }
+    }
+
+    // --- Grouped mode: show edges grouped by community ---
+    if (grouped && louvain) {
+        const uniqueCommunities = [...new Set(louvain.communities.values())];
+
+        // Group edges by community pair
+        type CommunityEdge = Edge & { fromCommunity: string; toCommunity: string };
+        const communityEdges: CommunityEdge[] = [];
+        for (const [, edge] of aggregated) {
+            const fromC = louvain.communities.get(edge.from) ?? "?";
+            const toC = louvain.communities.get(edge.to) ?? "?";
+            communityEdges.push({ ...edge, fromCommunity: fromC, toCommunity: toC });
+        }
+
+        // Group: intra-community first, then inter-community
+        const intra = communityEdges.filter(e => e.fromCommunity === e.toCommunity);
+        const inter = communityEdges.filter(e => e.fromCommunity !== e.toCommunity);
+
+        // Sort intra by community, then by weight desc
+        intra.sort((a, b) => a.fromCommunity.localeCompare(b.fromCommunity) || b.weight - a.weight);
+        inter.sort((a, b) => b.weight - a.weight);
+
+        // Group intra edges by community
+        const byCommunity = new Map<string, CommunityEdge[]>();
+        for (const e of intra) {
+            let arr = byCommunity.get(e.fromCommunity);
+            if (!arr) { arr = []; byCommunity.set(e.fromCommunity, arr); }
+            arr.push(e);
+        }
+
+        return (
+            <div className="dev-scrollbar flex h-full flex-col overflow-y-auto">
+                {/* Nodes summary */}
+                <div className="flex flex-wrap gap-1.5 border-b border-border/50 px-3 py-2">
+                    {[...nodeSet].map(id => {
+                        const community = louvain.communities.get(id);
+                        const color = community
+                            ? getCommunityColor(community, uniqueCommunities)
+                            : "hsl(0,0%,45%)";
+                        return (
+                            <span key={id} className="inline-flex items-center gap-1 rounded-full border border-border/50 px-2 py-0.5 text-[11px]">
+                                <span className="inline-block size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                                <span className="truncate" style={{ maxWidth: 120 }}>{extractHostname(id)}</span>
+                            </span>
+                        );
+                    })}
+                </div>
+
+                {/* Intra-community edges */}
+                {[...byCommunity.entries()].map(([communityId, cedges]) => {
+                    const color = getCommunityColor(communityId, uniqueCommunities);
+                    const members = [...(louvain.communities.entries())]
+                        .filter(([, c]) => c === communityId)
+                        .map(([n]) => n);
+                    return (
+                        <div key={communityId}>
+                            <div className="flex items-center gap-2 border-b border-border/30 bg-muted/30 px-3 py-1.5">
+                                <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: color }} />
+                                <span className="text-xs font-medium">Community</span>
+                                <span className="text-[10px] text-muted-foreground">{members.length} nodes</span>
+                            </div>
+                            <table className="w-full text-xs">
+                                <thead>
+                                    <tr className="border-b border-border/30 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                                        <th className="px-3 py-1 font-medium">From</th>
+                                        <th className="px-1 py-1 font-medium" />
+                                        <th className="px-3 py-1 font-medium">To</th>
+                                        <th className="px-3 py-1 text-right font-medium">Weight</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {cedges.map((e, i) => (
+                                        <tr key={i} className="border-b border-border/20 hover:bg-muted/20">
+                                            <td className="px-3 py-1.5">
+                                                <span className="inline-flex items-center gap-1.5">
+                                                    <span className="inline-block size-1.5 rounded-full" style={{ backgroundColor: color }} />
+                                                    <span className="truncate" style={{ maxWidth: 140 }} title={e.from}>{extractHostname(e.from)}</span>
+                                                </span>
+                                            </td>
+                                            <td className="px-1 py-1.5 text-muted-foreground">&rarr;</td>
+                                            <td className="px-3 py-1.5">
+                                                <span className="inline-flex items-center gap-1.5">
+                                                    <span className="inline-block size-1.5 rounded-full" style={{ backgroundColor: color }} />
+                                                    <span className="truncate" style={{ maxWidth: 140 }} title={e.to}>{extractHostname(e.to)}</span>
+                                                </span>
+                                            </td>
+                                            <td className="px-3 py-1.5 text-right tabular-nums">{e.weight}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    );
+                })}
+
+                {/* Inter-community edges */}
+                {inter.length > 0 && (
+                    <div>
+                        <div className="flex items-center gap-2 border-b border-border/30 bg-muted/30 px-3 py-1.5">
+                            <span className="text-xs font-medium text-muted-foreground">Cross-community</span>
+                            <span className="text-[10px] text-muted-foreground">{inter.length} edges</span>
+                        </div>
+                        <table className="w-full text-xs">
+                            <thead>
+                                <tr className="border-b border-border/30 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                                    <th className="px-3 py-1 font-medium">From</th>
+                                    <th className="px-1 py-1 font-medium" />
+                                    <th className="px-3 py-1 font-medium">To</th>
+                                    <th className="px-3 py-1 text-right font-medium">Weight</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {inter.map((e, i) => {
+                                    const fromColor = getCommunityColor(e.fromCommunity, uniqueCommunities);
+                                    const toColor = getCommunityColor(e.toCommunity, uniqueCommunities);
+                                    return (
+                                        <tr key={i} className="border-b border-border/20 hover:bg-muted/20">
+                                            <td className="px-3 py-1.5">
+                                                <span className="inline-flex items-center gap-1.5">
+                                                    <span className="inline-block size-1.5 rounded-full" style={{ backgroundColor: fromColor }} />
+                                                    <span className="truncate" style={{ maxWidth: 140 }} title={e.from}>{extractHostname(e.from)}</span>
+                                                </span>
+                                            </td>
+                                            <td className="px-1 py-1.5 text-muted-foreground">&rarr;</td>
+                                            <td className="px-3 py-1.5">
+                                                <span className="inline-flex items-center gap-1.5">
+                                                    <span className="inline-block size-1.5 rounded-full" style={{ backgroundColor: toColor }} />
+                                                    <span className="truncate" style={{ maxWidth: 140 }} title={e.to}>{extractHostname(e.to)}</span>
+                                                </span>
+                                            </td>
+                                            <td className="px-3 py-1.5 text-right tabular-nums">{e.weight}</td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    // --- Raw mode: flat table of all transitions ---
+    return (
+        <div className="dev-scrollbar flex h-full flex-col overflow-y-auto">
+            {/* Nodes strip */}
+            <div className="flex flex-wrap gap-1.5 border-b border-border/50 px-3 py-2">
+                {[...nodeSet].map(id => (
+                    <span key={id} className="inline-flex items-center gap-1 rounded-full border border-border/50 px-2 py-0.5 text-[11px]">
+                        <span className="inline-block size-2 shrink-0 rounded-full" style={{ backgroundColor: nodeColor(id) }} />
+                        <span className="truncate" style={{ maxWidth: 120 }}>{extractHostname(id)}</span>
+                    </span>
+                ))}
+            </div>
+
+            <table className="w-full text-xs">
+                <thead className="sticky top-0 z-10 bg-background">
+                    <tr className="border-b border-border/50 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                        <th className="px-3 py-1.5 font-medium">#</th>
+                        <th className="px-3 py-1.5 font-medium">From</th>
+                        <th className="px-1 py-1.5 font-medium" />
+                        <th className="px-3 py-1.5 font-medium">To</th>
+                        <th className="px-3 py-1.5 text-right font-medium">Dwell</th>
+                        <th className="px-3 py-1.5 text-right font-medium">Time</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {transitions.map((t, i) => (
+                        <tr key={i} className="border-b border-border/20 hover:bg-muted/20">
+                            <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{i + 1}</td>
+                            <td className="px-3 py-1.5">
+                                <span className="inline-flex items-center gap-1.5">
+                                    <span className="inline-block size-1.5 rounded-full" style={{ backgroundColor: nodeColor(t.from) }} />
+                                    <span className="truncate" style={{ maxWidth: 140 }} title={t.from}>{extractHostname(t.from)}</span>
+                                </span>
+                            </td>
+                            <td className="px-1 py-1.5 text-muted-foreground">&rarr;</td>
+                            <td className="px-3 py-1.5">
+                                <span className="inline-flex items-center gap-1.5">
+                                    <span className="inline-block size-1.5 rounded-full" style={{ backgroundColor: nodeColor(t.to) }} />
+                                    <span className="truncate" style={{ maxWidth: 140 }} title={t.to}>{extractHostname(t.to)}</span>
+                                </span>
+                            </td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{fmtDwell(t.dwellMs)}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{fmtTime(t.ts)}</td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
 export function GraphView({ entries, onClear, onSend }: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasWrapRef = useRef<HTMLDivElement>(null);
@@ -132,6 +378,7 @@ export function GraphView({ entries, onClear, onSend }: Props) {
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [hoverNodeId, setHoverNodeId] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<"raw" | "grouped">("raw");
+    const [viewMode, setViewMode] = useState<"graph" | "edges">("graph");
     const [panelOpen, setPanelOpen] = useState(false);
     const [panelWidth, setPanelWidth] = useState(288);
     const [dimMode, setDimMode] = useState(false);
@@ -156,17 +403,25 @@ export function GraphView({ entries, onClear, onSend }: Props) {
     const [transientDwellMs, setTransientDwellMs] = useState(500);
     const [targetPerChunk, setTargetPerChunk] = useState(4);
 
-    // Extract transitions from the latest snapshot
-    const latestTransitions = useMemo(() => {
+    // Extract transitions and sourceUrls from the latest snapshot
+    const latestSnapshot = useMemo(() => {
         for (let i = entries.length - 1; i >= 0; i--) {
             const entry = entries[i];
             if (entry.event === "state.snapshot" && entry.data) {
-                const snapshot = entry.data as { transitions?: Transition[] };
-                return snapshot.transitions ?? [];
+                const snapshot = entry.data as {
+                    transitions?: Transition[];
+                    sourceUrls?: Record<string, string>;
+                };
+                return {
+                    transitions: snapshot.transitions ?? [],
+                    sourceUrls: snapshot.sourceUrls ?? {},
+                };
             }
         }
-        return [];
+        return { transitions: [] as Transition[], sourceUrls: {} as Record<string, string> };
     }, [entries]);
+
+    const latestTransitions = latestSnapshot.transitions;
 
     // Compute grouped graph when in grouped mode
     const groupedResultRef = useRef<{
@@ -592,15 +847,25 @@ export function GraphView({ entries, onClear, onSend }: Props) {
             }
         }
 
+        // --- compute per-node degree for sizing ---
+        const degreeMap = new Map<string, number>();
+        for (const edge of edges) {
+            degreeMap.set(edge.from, (degreeMap.get(edge.from) ?? 0) + edge.weight);
+            degreeMap.set(edge.to, (degreeMap.get(edge.to) ?? 0) + edge.weight);
+        }
+
         // --- nodes ---
         for (const node of nodes) {
-            const isUnknown = node.id === "UNKNOWN";
+            const isUnknown = node.id === "unknown" || node.id === "UNKNOWN";
+            const isOffBrowser = node.id === "off_browser";
             const isHovered = node.id === hoverId;
+            const degree = degreeMap.get(node.id) ?? 0;
+            const r = NODE_RADIUS + Math.min(Math.log2(degree + 1) * 2, 8);
 
             // hover highlight ring
             if (isHovered) {
                 ctx.beginPath();
-                ctx.arc(node.x, node.y, NODE_RADIUS + 5, 0, Math.PI * 2);
+                ctx.arc(node.x, node.y, r + 5, 0, Math.PI * 2);
                 ctx.strokeStyle = "rgba(120,180,255,0.35)";
                 ctx.lineWidth = 2.5;
                 ctx.stroke();
@@ -608,7 +873,7 @@ export function GraphView({ entries, onClear, onSend }: Props) {
 
             const isDimmed = dim && !connectedSet.has(node.id);
             ctx.beginPath();
-            ctx.arc(node.x, node.y, NODE_RADIUS, 0, Math.PI * 2);
+            ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
 
             if (isDimmed) {
                 ctx.fillStyle = "rgba(120,120,120,0.15)";
@@ -618,12 +883,13 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                 ctx.fillStyle = communityId
                     ? getCommunityColor(communityId, uniqueCommunities)
                     : "rgba(120,120,120,0.4)";
-            } else if (isUnknown) {
+            } else if (isUnknown || isOffBrowser) {
                 ctx.fillStyle = "rgba(120,120,120,0.4)";
             } else if (isHovered) {
-                ctx.fillStyle = "hsl(210, 90%, 68%)";
+                const base = nodeColor(node.id);
+                ctx.fillStyle = base.replace("55%", "68%");
             } else {
-                ctx.fillStyle = "hsl(210, 80%, 60%)";
+                ctx.fillStyle = nodeColor(node.id);
             }
             ctx.fill();
 
@@ -634,22 +900,47 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                 ctx.stroke();
                 ctx.setLineDash([]);
             }
+            if (isOffBrowser) {
+                ctx.setLineDash([6, 4]);
+                ctx.strokeStyle = "rgba(160,160,160,0.6)";
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
 
-            // Source ID label + URL
+            // Labels: context name (bold), tab ID (small), URL hostname
             const showLabel = !dim || connectedSet.has(node.id);
             if (showLabel) {
                 ctx.textAlign = "center";
                 ctx.textBaseline = "top";
-                ctx.font = "11px sans-serif";
-                ctx.fillStyle = "rgba(220,220,220,0.9)";
-                ctx.fillText(node.id, node.x, node.y + NODE_RADIUS + 4);
-                if (node.url) {
-                    try {
-                        const host = new URL(node.url).hostname.replace(/^www\./, "");
-                        ctx.font = "9px sans-serif";
-                        ctx.fillStyle = "rgba(160,180,220,0.7)";
-                        ctx.fillText(host, node.x, node.y + NODE_RADIUS + 18);
-                    } catch { /* invalid url */ }
+                const at = node.id.indexOf("@");
+                if (at >= 0) {
+                    const context = node.id.slice(0, at);
+                    const tabId = node.id.slice(at + 1);
+                    // Context name — primary label
+                    ctx.font = "bold 11px sans-serif";
+                    ctx.fillStyle = "rgba(230,230,230,0.95)";
+                    ctx.fillText(context, node.x, node.y + r + 4);
+                    // Tab ID — secondary
+                    ctx.font = "9px sans-serif";
+                    ctx.fillStyle = "rgba(160,160,170,0.6)";
+                    ctx.fillText(`@${tabId}`, node.x, node.y + r + 17);
+                    // URL hostname — tertiary
+                    if (node.url) {
+                        try {
+                            const host = new URL(node.url).hostname.replace(/^www\./, "");
+                            ctx.font = "9px sans-serif";
+                            ctx.fillStyle = "rgba(140,170,220,0.7)";
+                            ctx.fillText(host, node.x, node.y + r + 29);
+                        } catch { /* invalid url */ }
+                    }
+                } else {
+                    // No @ — show as-is (e.g. off_browser, unknown)
+                    ctx.font = "bold 11px sans-serif";
+                    ctx.fillStyle = isOffBrowser || isUnknown
+                        ? "rgba(160,160,160,0.7)"
+                        : "rgba(230,230,230,0.95)";
+                    ctx.fillText(node.id, node.x, node.y + r + 4);
                 }
             }
         }
@@ -921,10 +1212,16 @@ export function GraphView({ entries, onClear, onSend }: Props) {
             (s, e) => s + e.weight,
             0,
         );
+        // Total dwell time: sum dwellMs for transitions where this node is the "from" source
+        let totalDwellMs = 0;
+        for (const t of latestTransitions) {
+            if (t.from === nodeId) totalDwellMs += t.dwellMs;
+        }
         return {
             inbound,
             outbound,
             totalWeight,
+            totalDwellMs,
             degree: inbound.length + outbound.length,
         };
     }
@@ -935,17 +1232,53 @@ export function GraphView({ entries, onClear, onSend }: Props) {
         const node = nodesRef.current.get(hoverNodeId);
         if (node) {
             const stats = getStats(hoverNodeId);
+            const at = node.id.indexOf("@");
+            const contextName = at >= 0 ? node.id.slice(0, at) : node.id;
+            const tabId = at >= 0 ? node.id.slice(at + 1) : null;
+            const gr2 = groupedResultRef.current;
+            const communityId = gr2?.louvain.communities.get(node.id) ?? null;
+            const uniqueCommunities = gr2 ? [...new Set(gr2.louvain.communities.values())] : [];
+
             tooltipContent = (
                 <div
                     ref={tooltipRef}
-                    className="pointer-events-none absolute bottom-3 right-3 z-10 w-52 rounded-lg border border-border/50 bg-popover/95 p-3 text-xs text-popover-foreground opacity-0 shadow-xl backdrop-blur-sm"
+                    className="pointer-events-none absolute bottom-3 right-3 z-10 w-60 rounded-lg border border-border/50 bg-popover/95 p-3 text-xs text-popover-foreground opacity-0 shadow-xl backdrop-blur-sm"
                 >
-                    <div className="truncate text-sm font-semibold">
-                        {node.id}
+                    {/* Source identity */}
+                    <div className="flex items-center gap-2">
+                        <span
+                            className="inline-block size-2.5 shrink-0 rounded-full"
+                            style={{
+                                backgroundColor: activeTab === "grouped" && communityId
+                                    ? getCommunityColor(communityId, uniqueCommunities)
+                                    : nodeColor(node.id),
+                            }}
+                        />
+                        <span className="truncate text-sm font-semibold">{contextName}</span>
                     </div>
+                    {tabId && (
+                        <div className="mt-0.5 text-[10px] text-muted-foreground">
+                            tab <span className="font-mono">{tabId}</span>
+                        </div>
+                    )}
                     {node.url && (
-                        <div className="truncate text-[10px] text-muted-foreground" title={node.url}>
+                        <div className="mt-0.5 truncate text-[10px] text-blue-400/80" title={node.url}>
                             {node.url}
+                        </div>
+                    )}
+
+                    {/* Community badge (grouped mode) */}
+                    {activeTab === "grouped" && communityId && (
+                        <div className="mt-1.5 flex items-center gap-1.5">
+                            <span
+                                className="inline-block size-2 rounded-full"
+                                style={{ backgroundColor: getCommunityColor(communityId, uniqueCommunities) }}
+                            />
+                            <span className="text-[10px] text-muted-foreground">
+                                Community &middot; {
+                                    [...(gr2?.louvain.communities.values() ?? [])].filter(c => c === communityId).length
+                                } members
+                            </span>
                         </div>
                     )}
 
@@ -966,6 +1299,10 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                         <span className="text-right tabular-nums">
                             {stats.totalWeight}
                         </span>
+                        <span className="text-muted-foreground">Dwell</span>
+                        <span className="text-right tabular-nums">
+                            {fmtDwell(stats.totalDwellMs)}
+                        </span>
                     </div>
 
                     {stats.outbound.length > 0 && (
@@ -980,7 +1317,7 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                                             <span className="text-blue-400">
                                                 &rarr;
                                             </span>{" "}
-                                            {e.to}
+                                            {extractHostname(e.to)}
                                         </span>
                                         <span className="shrink-0 tabular-nums">
                                             &times;{e.weight}
@@ -1002,7 +1339,7 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                                             <span className="text-emerald-400">
                                                 &larr;
                                             </span>{" "}
-                                            {e.from}
+                                            {extractHostname(e.from)}
                                         </span>
                                         <span className="shrink-0 tabular-nums">
                                             &times;{e.weight}
@@ -1037,30 +1374,64 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                 ref={canvasWrapRef}
                 className="relative flex-1 overflow-hidden"
             >
-                <canvas ref={canvasRef} className="block h-full w-full" />
-                {tooltipContent}
-                <Tabs
-                    value={activeTab}
-                    onValueChange={(v) => setActiveTab(v as "raw" | "grouped")}
-                    className="absolute left-2 top-2 z-10"
-                >
-                    <TabsList className="h-auto border border-border bg-popover/80 p-0.5 backdrop-blur-sm">
-                        <TabsTrigger
-                            value="raw"
-                            className="h-auto px-2 py-0.5 text-xs"
-                        >
-                            <Waypoints className="size-3" />
-                            Raw
-                        </TabsTrigger>
-                        <TabsTrigger
-                            value="grouped"
-                            className="h-auto px-2 py-0.5 text-xs"
-                        >
-                            <Boxes className="size-3" />
-                            Grouped
-                        </TabsTrigger>
-                    </TabsList>
-                </Tabs>
+                {viewMode === "graph" ? (
+                    <>
+                        <canvas ref={canvasRef} className="block h-full w-full" />
+                        {tooltipContent}
+                    </>
+                ) : (
+                    <div className="h-full pt-10">
+                        <EdgeTable
+                            transitions={activeTab === "grouped" && groupedResult ? groupedResult.pr.transitions : latestTransitions}
+                            grouped={activeTab === "grouped"}
+                            louvain={groupedResult?.louvain ?? null}
+                        />
+                    </div>
+                )}
+                <div className="absolute left-2 top-2 z-10 flex gap-1.5">
+                    <Tabs
+                        value={activeTab}
+                        onValueChange={(v) => setActiveTab(v as "raw" | "grouped")}
+                    >
+                        <TabsList className="h-auto border border-border bg-popover/80 p-0.5 backdrop-blur-sm">
+                            <TabsTrigger
+                                value="raw"
+                                className="h-auto px-2 py-0.5 text-xs"
+                            >
+                                <Waypoints className="size-3" />
+                                Raw
+                            </TabsTrigger>
+                            <TabsTrigger
+                                value="grouped"
+                                className="h-auto px-2 py-0.5 text-xs"
+                            >
+                                <Boxes className="size-3" />
+                                Grouped
+                            </TabsTrigger>
+                        </TabsList>
+                    </Tabs>
+                    <Tabs
+                        value={viewMode}
+                        onValueChange={(v) => setViewMode(v as "graph" | "edges")}
+                    >
+                        <TabsList className="h-auto border border-border bg-popover/80 p-0.5 backdrop-blur-sm">
+                            <TabsTrigger
+                                value="graph"
+                                className="h-auto px-2 py-0.5 text-xs"
+                            >
+                                <GitGraph className="size-3" />
+                                Graph
+                            </TabsTrigger>
+                            <TabsTrigger
+                                value="edges"
+                                className="h-auto px-2 py-0.5 text-xs"
+                            >
+                                <Rows3 className="size-3" />
+                                Edges
+                            </TabsTrigger>
+                        </TabsList>
+                    </Tabs>
+                </div>
                 <div className="absolute right-2 top-2 flex gap-1">
                     {onClear && (
                         <Tooltip>
@@ -1075,43 +1446,47 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                             <TooltipContent>Reset all state</TooltipContent>
                         </Tooltip>
                     )}
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Button
-                                variant={physicsOpen ? "default" : "outline"}
-                                size="icon-xs"
-                                onClick={() => setPhysicsOpen((o) => !o)}
-                            >
-                                <Settings2 />
-                            </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>{physicsOpen ? "Close physics" : "Physics settings"}</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Button
-                                variant={dimMode ? "default" : "outline"}
-                                size="icon-xs"
-                                onClick={() => {
-                                    setDimMode((d) => {
-                                        dimRef.current = !d;
-                                        return !d;
-                                    });
-                                }}
-                            >
-                                <Eclipse />
-                            </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>{dimMode ? "Disable dim mode" : "Enable dim mode"}</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Button variant="outline" size="icon-xs" onClick={fitToView}>
-                                <Scan />
-                            </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Fit to view</TooltipContent>
-                    </Tooltip>
+                    {viewMode === "graph" && (
+                        <>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant={physicsOpen ? "default" : "outline"}
+                                        size="icon-xs"
+                                        onClick={() => setPhysicsOpen((o) => !o)}
+                                    >
+                                        <Settings2 />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>{physicsOpen ? "Close physics" : "Physics settings"}</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant={dimMode ? "default" : "outline"}
+                                        size="icon-xs"
+                                        onClick={() => {
+                                            setDimMode((d) => {
+                                                dimRef.current = !d;
+                                                return !d;
+                                            });
+                                        }}
+                                    >
+                                        <Eclipse />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>{dimMode ? "Disable dim mode" : "Enable dim mode"}</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button variant="outline" size="icon-xs" onClick={fitToView}>
+                                        <Scan />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Fit to view</TooltipContent>
+                            </Tooltip>
+                        </>
+                    )}
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <Button variant="outline" size="icon-xs" onClick={toggleFullscreen}>
@@ -1129,7 +1504,7 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                         <TooltipContent>{panelOpen ? "Close panel" : "Open panel"}</TooltipContent>
                     </Tooltip>
                 </div>
-                {physicsOpen && (
+                {physicsOpen && viewMode === "graph" && (
                     <div className="absolute bottom-2 left-2 z-10 w-56 rounded-lg border border-border/50 bg-popover/95 p-3 text-xs text-popover-foreground shadow-xl backdrop-blur-sm">
                         <div className="mb-2 font-semibold text-sm">
                             Physics
@@ -1454,18 +1829,52 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                             </>
                         ) : (
                             /* Raw panel */
-                            <div className="space-y-3">
-                                <div>
-                                    <div className="text-muted-foreground">Transitions</div>
-                                    <div className="text-lg tabular-nums">{latestTransitions.length}</div>
+                            <div className="space-y-4">
+                                <div className="grid grid-cols-3 gap-2">
+                                    <div className="rounded border border-border/50 p-2 text-center">
+                                        <div className="text-lg tabular-nums">{latestTransitions.length}</div>
+                                        <div className="text-[10px] text-muted-foreground">Transitions</div>
+                                    </div>
+                                    <div className="rounded border border-border/50 p-2 text-center">
+                                        <div className="text-lg tabular-nums">{nodesRef.current.size}</div>
+                                        <div className="text-[10px] text-muted-foreground">Nodes</div>
+                                    </div>
+                                    <div className="rounded border border-border/50 p-2 text-center">
+                                        <div className="text-lg tabular-nums">{edgesRef.current.size}</div>
+                                        <div className="text-[10px] text-muted-foreground">Edges</div>
+                                    </div>
                                 </div>
-                                <div>
-                                    <div className="text-muted-foreground">Nodes</div>
-                                    <div className="text-lg tabular-nums">{nodesRef.current.size}</div>
-                                </div>
-                                <div>
-                                    <div className="text-muted-foreground">Edges</div>
-                                    <div className="text-lg tabular-nums">{edgesRef.current.size}</div>
+                                <Separator />
+                                <div className="space-y-2">
+                                    <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                        Sources
+                                    </div>
+                                    {[...nodesRef.current.values()].map(node => {
+                                        const at = node.id.indexOf("@");
+                                        const context = at >= 0 ? node.id.slice(0, at) : node.id;
+                                        const tabIdPart = at >= 0 ? node.id.slice(at + 1) : null;
+                                        return (
+                                            <div key={node.id} className="flex items-start gap-2 rounded border border-border/30 p-1.5">
+                                                <span
+                                                    className="mt-0.5 inline-block size-2 shrink-0 rounded-full"
+                                                    style={{ backgroundColor: nodeColor(node.id) }}
+                                                />
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="truncate font-medium" title={node.id}>{context}</div>
+                                                    {tabIdPart && (
+                                                        <div className="text-[10px] text-muted-foreground">
+                                                            tab <span className="font-mono">{tabIdPart}</span>
+                                                        </div>
+                                                    )}
+                                                    {node.url && (
+                                                        <div className="truncate text-[10px] text-blue-400/70" title={node.url}>
+                                                            {node.url}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             </div>
                         )}

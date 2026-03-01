@@ -10,6 +10,75 @@ const aggregator = createAggregator();
 const packer = createPacker(aggregator);
 const checkpointer = createCheckpointer(aggregator);
 
+// ── Sync constants ──────────────────────────────────────────
+
+const SYNC_PERIODIC_MINUTES = 120; // 2 hours
+const SYNC_IDLE_MINUTES = 10; // 10 minutes off-browser
+
+// ── Active Tab Tracking (tabStates) ─────────────────────────
+
+const tabStates = new Map<
+    number,
+    { url: string; title: string; visible: boolean }
+>();
+
+let previousActiveTabId: number | null = null;
+
+function getActiveTab() {
+    for (const [tabId, state] of tabStates.entries()) {
+        if (state.visible) return { tabId, ...state };
+    }
+    return null;
+}
+
+function onActiveTabChanged(): void {
+    const active = getActiveTab();
+    const newTabId = active?.tabId ?? null;
+    if (newTabId === previousActiveTabId) return;
+    previousActiveTabId = newTabId;
+
+    if (active) {
+        aggregator.setActiveTab(String(active.tabId), active.url);
+        chrome.alarms.clear("sync-idle");
+        dev.log("sync", "idle.cancelled", "sync-idle alarm cancelled");
+    } else {
+        aggregator.setActiveTab(null);
+        chrome.alarms.create("sync-idle", {
+            delayInMinutes: SYNC_IDLE_MINUTES,
+        });
+        dev.log(
+            "sync",
+            "idle.armed",
+            `sync-idle alarm set (${SYNC_IDLE_MINUTES}m)`,
+        );
+    }
+}
+
+async function updateActiveTabFromApi(): Promise<void> {
+    const [tab] = await chrome.tabs.query({
+        active: true,
+        lastFocusedWindow: true,
+    });
+
+    if (!tab?.id) return;
+
+    // Mark all existing tabs as not visible
+    for (const [id, state] of tabStates.entries()) {
+        if (state.visible) {
+            tabStates.set(id, { ...state, visible: false });
+        }
+    }
+
+    // Set the active tab
+    tabStates.set(tab.id, {
+        url: tab.url ?? tab.pendingUrl ?? "",
+        title: tab.title ?? "",
+        visible: true,
+    });
+
+    onActiveTabChanged();
+}
+
 // ── Receive Captures from the Event Layer (port-based) ──────
 
 chrome.runtime.onConnect.addListener((port) => {
@@ -99,6 +168,23 @@ chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
         },
         String(tabId),
     );
+    tabStates.delete(tabId);
+    onActiveTabChanged();
+});
+
+// Layer 2 tab tracking — Chrome Tabs API
+chrome.tabs.onActivated.addListener(() => updateActiveTabFromApi());
+chrome.windows.onFocusChanged.addListener((windowId) => {
+    if (windowId === chrome.windows.WINDOW_ID_NONE) {
+        for (const [id, state] of tabStates.entries()) {
+            if (state.visible) {
+                tabStates.set(id, { ...state, visible: false });
+            }
+        }
+        onActiveTabChanged();
+    } else {
+        updateActiveTabFromApi();
+    }
 });
 
 chrome.tabs.onMoved.addListener((tabId, moveInfo) => {
@@ -202,8 +288,27 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 chrome.runtime.onMessage.addListener((msg, sender) => {
     if (msg.type !== "page:visibility") return;
-    const tabId = String(sender.tab?.id ?? "unknown");
-    aggregator.onVisibilityChanged(tabId, msg.visible);
+    const numericTabId = sender.tab?.id;
+    const tabId = String(numericTabId ?? "unknown");
+
+    // Update tabStates from content script (Layer 1)
+    if (numericTabId != null) {
+        if (msg.visible) {
+            // Mark all others not visible first
+            for (const [id, state] of tabStates.entries()) {
+                if (state.visible && id !== numericTabId) {
+                    tabStates.set(id, { ...state, visible: false });
+                }
+            }
+        }
+        tabStates.set(numericTabId, {
+            url: msg.url ?? "",
+            title: msg.title ?? "",
+            visible: msg.visible,
+        });
+        onActiveTabChanged();
+    }
+
     aggregator.ingestSignal(
         {
             type: "attention.visible",
@@ -251,9 +356,6 @@ chrome.downloads.onChanged.addListener((delta) => {
 
 // ── Sync triggers ───────────────────────────────────────────
 
-const SYNC_PERIODIC_MINUTES = 120; // 2 hours
-const SYNC_IDLE_MINUTES = 10; // 10 minutes off-browser
-
 async function flushAndSync(): Promise<void> {
     const packet = packer.flush();
     if (!packet) return;
@@ -285,23 +387,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
                 periodInMinutes: SYNC_PERIODIC_MINUTES,
             });
         }
-    }
-});
-
-// Off-browser idle alarm — managed by the aggregator callback
-aggregator.onOffBrowser((offBrowser) => {
-    if (offBrowser) {
-        chrome.alarms.create("sync-idle", {
-            delayInMinutes: SYNC_IDLE_MINUTES,
-        });
-        dev.log(
-            "sync",
-            "idle.armed",
-            `sync-idle alarm set (${SYNC_IDLE_MINUTES}m)`,
-        );
-    } else {
-        chrome.alarms.clear("sync-idle");
-        dev.log("sync", "idle.cancelled", "sync-idle alarm cancelled");
     }
 });
 

@@ -21,6 +21,7 @@ export default defineManifest({
         "webNavigation",
         "idle",
         "downloads",
+        "windows",
     ],
     background: {
         service_worker: "src/background/main.ts",

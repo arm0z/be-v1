@@ -84,10 +84,9 @@ export type Packet = {
 export type Aggregator = {
     ingest(capture: Capture, tabId: string): void;
     ingestSignal(signal: Signal, tabId: string): void;
-    onVisibilityChanged(tabId: string, visible: boolean): void;
 
-    /** Register a callback for off-browser state changes. */
-    onOffBrowser(cb: (offBrowser: boolean) => void): void;
+    /** Set the currently active tab, or null for off-browser. */
+    setActiveTab(tabId: string | null, url?: string): void;
 
     getSealed(): Bundle[];
     drainSealed(): Bundle[];

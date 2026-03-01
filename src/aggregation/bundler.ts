@@ -10,48 +10,11 @@ import { OFF_BROWSER, UNKNOWN } from "./types.ts";
 import { dev } from "../event/dev.ts";
 import { translate } from "./translate.ts";
 
-const DWELL_MS = 1_000;
-
 export function createBundler() {
     let activeSource: string | null = null;
     let openBundle: Bundle | null = null;
     const sealed: Bundle[] = [];
     const transitions: Transition[] = [];
-
-    // ── dwell mechanism ────────────────────────────────────────
-    // Holds an edge for DWELL_MS before committing. If the target
-    // source transitions away within the window, the edge collapses
-    // (A→B→C becomes A→C), preventing brief intermediates like
-    // off_browser from appearing in the graph.
-
-    let pendingEdge: Transition | null = null;
-    let dwellTimer: ReturnType<typeof setTimeout> | null = null;
-
-    function commitPending(): void {
-        if (!pendingEdge) return;
-        transitions.push(pendingEdge);
-        dev.log(
-            "aggregator",
-            "edge.committed",
-            `${pendingEdge.from} → ${pendingEdge.to}`,
-            { from: pendingEdge.from, to: pendingEdge.to, dwellMs: pendingEdge.dwellMs },
-        );
-        pendingEdge = null;
-        if (dwellTimer !== null) {
-            clearTimeout(dwellTimer);
-            dwellTimer = null;
-        }
-    }
-
-    function startDwellTimer(): void {
-        if (dwellTimer !== null) clearTimeout(dwellTimer);
-        dwellTimer = setTimeout(() => {
-            dwellTimer = null;
-            commitPending();
-        }, DWELL_MS);
-    }
-
-    // ── core operations ────────────────────────────────────────
 
     function openNew(source: string): void {
         openBundle = {
@@ -89,53 +52,20 @@ export function createBundler() {
         const from = activeSource;
         seal();
 
-        if (from) {
+        if (from && from !== to) {
             const lastSealed = sealed[sealed.length - 1];
             const dwellMs = lastSealed
                 ? lastSealed.endedAt! - lastSealed.startedAt
                 : 0;
-
-            if (pendingEdge && dwellMs < DWELL_MS) {
-                // Intermediate source dwelled briefly → collapse
-                if (dwellTimer !== null) {
-                    clearTimeout(dwellTimer);
-                    dwellTimer = null;
-                }
-                dev.log(
-                    "aggregator",
-                    "edge.collapsed",
-                    `${pendingEdge.from} → ${from} → ${to} collapsed to ${pendingEdge.from} → ${to}`,
-                    {
-                        original: { from: pendingEdge.from, to: from },
-                        collapsed: { from: pendingEdge.from, to },
-                        intermediateDwellMs: dwellMs,
-                    },
-                );
-
-                if (pendingEdge.from === to) {
-                    // Self-loop after collapse (e.g. A → off_browser → A) — drop
-                    pendingEdge = null;
-                } else {
-                    pendingEdge = {
-                        from: pendingEdge.from,
-                        to,
-                        ts: Date.now(),
-                        dwellMs: pendingEdge.dwellMs,
-                    };
-                    startDwellTimer();
-                }
-            } else {
-                // Commit previous pending (if any), start new pending
-                commitPending();
-                pendingEdge = { from, to, ts: Date.now(), dwellMs };
-                startDwellTimer();
-            }
+            transitions.push({ from, to, ts: Date.now(), dwellMs });
+            dev.log(
+                "aggregator",
+                "edge.committed",
+                `${from} → ${to}`,
+                { from, to, dwellMs },
+            );
         }
 
-        dev.log("aggregator", "transition", `${from ?? "∅"} → ${to}`, {
-            from,
-            to,
-        });
         activeSource = to;
         if (to !== UNKNOWN && to !== OFF_BROWSER) {
             openNew(to);
@@ -199,12 +129,10 @@ export function createBundler() {
     }
 
     function getTransitions(): Transition[] {
-        if (pendingEdge) return [...transitions, pendingEdge];
         return [...transitions];
     }
 
     function drainTransitions(): Transition[] {
-        commitPending();
         const result = [...transitions];
         transitions.length = 0;
         return result;
@@ -217,7 +145,6 @@ export function createBundler() {
     }
 
     function snapshot(): Checkpoint {
-        commitPending();
         return {
             activeSource,
             openBundle: openBundle
