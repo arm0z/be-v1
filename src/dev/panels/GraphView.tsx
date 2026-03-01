@@ -460,8 +460,8 @@ export function GraphView({ entries, onClear, onSend }: Props) {
     const [viewMode, setViewMode] = useState<"graph" | "edges">("graph");
     const [panelOpen, setPanelOpen] = useState(false);
     const [panelWidth, setPanelWidth] = useState(288);
-    const [dimMode, setDimMode] = useState(true);
-    const dimRef = useRef(true);
+    const [focusMode, setFocusMode] = useState(true);
+    const focusRef = useRef(true);
     const [showHulls, setShowHulls] = useState(true);
     const showHullsRef = useRef(true);
     const [physicsOpen, setPhysicsOpen] = useState(false);
@@ -901,9 +901,9 @@ export function GraphView({ entries, onClear, onSend }: Props) {
 
         // --- edges ---
         const hoverId = hoverIdRef.current;
-        const dim = dimRef.current && hoverId !== null;
+        const focus = focusRef.current && hoverId !== null;
         const connectedSet = new Set<string>();
-        if (!!dim) {
+        if (focus) {
             connectedSet.add(hoverId);
             for (const edge of edges) {
                 if (edge.from === hoverId) connectedSet.add(edge.to);
@@ -931,11 +931,15 @@ export function GraphView({ entries, onClear, onSend }: Props) {
             const isOutbound = hoverId !== null && edge.from === hoverId;
             const isInbound = hoverId !== null && edge.to === hoverId;
 
-            const color = isOutbound
-                ? "rgba(96,165,250,0.6)"
-                : isInbound
-                  ? "rgba(74,222,128,0.6)"
-                  : "rgba(160,160,160,0.4)";
+            const isFocusDimmed = focus && !isOutbound && !isInbound;
+
+            const color = isFocusDimmed
+                ? "rgba(160,160,160,0.1)"
+                : isOutbound
+                  ? "rgba(96,165,250,0.6)"
+                  : isInbound
+                    ? "rgba(74,222,128,0.6)"
+                    : "rgba(160,160,160,0.4)";
             const lineW = 1 + Math.log2(Math.max(edge.weight, 1));
 
             ctx.beginPath();
@@ -970,8 +974,7 @@ export function GraphView({ entries, onClear, onSend }: Props) {
             ctx.fillStyle = color;
             ctx.fill();
 
-            const isRelated = isOutbound || isInbound;
-            if (!dim || isRelated) {
+            if (!isFocusDimmed) {
                 const mx = (ax + bx) / 2;
                 const my = (ay + by) / 2;
                 ctx.font = "10px sans-serif";
@@ -1013,12 +1016,13 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                 ctx.stroke();
             }
 
-            const isDimmed = dim && !connectedSet.has(node.id);
+            const isNodeDimmed = focus && !connectedSet.has(node.id);
+
             ctx.beginPath();
             ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
 
-            if (isDimmed) {
-                ctx.fillStyle = "rgba(120,120,120,0.15)";
+            if (isNodeDimmed) {
+                ctx.fillStyle = "rgba(120,120,120,0.1)";
             } else if (activeTabRef.current === "grouped" && gr) {
                 const communityId = gr.louvain.communities.get(node.id);
                 const uniqueCommunities = [
@@ -1039,21 +1043,25 @@ export function GraphView({ entries, onClear, onSend }: Props) {
 
             if (isUnknown) {
                 ctx.setLineDash([3, 3]);
-                ctx.strokeStyle = "rgba(160,160,160,0.8)";
+                ctx.strokeStyle = isNodeDimmed
+                    ? "rgba(160,160,160,0.1)"
+                    : "rgba(160,160,160,0.8)";
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
                 ctx.setLineDash([]);
             }
             if (isOffBrowser) {
                 ctx.setLineDash([6, 4]);
-                ctx.strokeStyle = "rgba(160,160,160,0.6)";
+                ctx.strokeStyle = isNodeDimmed
+                    ? "rgba(160,160,160,0.1)"
+                    : "rgba(160,160,160,0.6)";
                 ctx.lineWidth = 1;
                 ctx.stroke();
                 ctx.setLineDash([]);
             }
 
             // Labels: context name (bold), tab ID (small), URL hostname
-            const showLabel = !dim || connectedSet.has(node.id);
+            const showLabel = !isNodeDimmed;
             if (showLabel) {
                 ctx.textAlign = "center";
                 ctx.textBaseline = "top";
@@ -1776,19 +1784,19 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                                         variant="outline"
                                         size="icon-xs"
                                         onClick={() => {
-                                            setDimMode((d) => {
-                                                dimRef.current = !d;
-                                                return !d;
+                                            setFocusMode((f) => {
+                                                focusRef.current = !f;
+                                                return !f;
                                             });
                                         }}
                                     >
-                                        {dimMode ? <EyeOff /> : <Eye />}
+                                        {focusMode ? <EyeOff /> : <Eye />}
                                     </Button>
                                 </TooltipTrigger>
                                 <TooltipContent>
-                                    {dimMode
-                                        ? "Disable dim mode"
-                                        : "Enable dim mode"}
+                                    {focusMode
+                                        ? "Disable focus mode"
+                                        : "Enable focus mode"}
                                 </TooltipContent>
                             </Tooltip>
                             {activeTab === "grouped" && (
