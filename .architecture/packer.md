@@ -682,13 +682,12 @@ Each bundle already has `.text` populated by `translate()` at seal time. The gro
 
 The Packer doesn't decide when to flush — something upstream calls `flush()`. Possible triggers:
 
-| Trigger     | Source                          | When                                            |
-| ----------- | ------------------------------- | ----------------------------------------------- |
-| Timer       | `chrome.alarms`                 | Every N minutes of active use                   |
-| Event count | Aggregator                      | After N sealed bundles accumulate               |
-| Manual      | User action (e.g. popup button) | On demand                                       |
-| Recovery    | Persistence layer               | On service worker restart with stale checkpoint |
-| Shutdown    | `chrome.runtime.onSuspend`      | Best-effort before service worker dies          |
+| Trigger          | Source                     | When                                            |
+| ---------------- | -------------------------- | ----------------------------------------------- |
+| Periodic         | `chrome.alarms` (2h)       | Every 2 hours regardless of activity            |
+| Off-browser idle | `chrome.alarms` (10m)      | 10 minutes after the user leaves the browser    |
+| Recovery         | Checkpoint recovery        | On service worker restart with stale checkpoint |
+| Shutdown         | `chrome.runtime.onSuspend` | Best-effort before service worker dies          |
 
 The trigger mechanism is outside the Packer's scope. All the Packer knows is: `flush()` was called, drain everything, build a Packet.
 
@@ -725,15 +724,15 @@ if (packet) await sync(packet);
 
 The Packer has no knowledge of HTTP, auth tokens, retry queues, or the server. It builds the Packet; the Syncing Layer delivers it.
 
-## Interaction with the Persistence Layer
+## Interaction with Checkpointing
 
-The Persistence Layer checkpoints the Aggregator's state (open bundle, sealed bundles, transitions, active source) to `chrome.storage.local`. On recovery:
+Checkpointing writes the Aggregator's state (open bundle, sealed bundles, transitions, active source) to `chrome.storage.local` every 50 sealed bundles. On recovery:
 
 1. The checkpoint is restored into the Bundler and transition log.
-2. Any stale open Bundle is sealed (with `endedAt` set to the checkpoint's `savedAt` timestamp).
+2. Any stale open Bundle is sealed (with `endedAt` set to the timestamp of its last capture).
 3. `flush()` is called to pack everything into a Packet and sync it.
 
-The Packer itself is stateless — it reads, transforms, and returns. There's nothing to persist about the Packer between service worker restarts.
+The Packer itself is stateless — it reads, transforms, and returns. There's nothing to checkpoint about the Packer between service worker restarts.
 
 ## Dev logs
 
@@ -1019,7 +1018,7 @@ export type PreprocessOptions = {
  */
 type ResolvedOptions = Required<PreprocessOptions>;
 
-function resolveOptions(options?: PreprocessOptions): ResolvedOptions;
+function resolveOptions(opts?: PreprocessOptions): ResolvedOptions;
 
 // ── Public API ─────────────────────────────────────────────
 
@@ -1036,7 +1035,7 @@ function resolveOptions(options?: PreprocessOptions): ResolvedOptions;
  */
 export function preprocess(
     raw: Transition[],
-    options?: PreprocessOptions,
+    opts?: PreprocessOptions,
 ): PreprocessResult;
 
 // ── Internal helpers ───────────────────────────────────────

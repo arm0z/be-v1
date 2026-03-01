@@ -17,7 +17,7 @@
 │  │   │ Tap │───▶│ Adapter │───▶│ Normalizer │───▶│ Relay │───────────┼──┼──▶ Service Worker
 │  │   └─────┘    └─────────┘    └────────────┘    └───────┘           │  │
 │  │     DOM        filter /       consume /          port             │  │
-│  │   events     inject / snap   batch / dedup                       │  │
+│  │   events     inject / snap   batch / dedup                        │  │
 │  │                                                                   │  │
 │  │   ◀──────── Capture ────────▶                   ◀── Teardown ───▶ │  │
 │  │   { type, timestamp, context, payload }             () => void    │  │
@@ -659,9 +659,18 @@ The service worker doesn't know or care which pipeline produced the Captures. Th
 ```text
 ┌─ Service Worker ────────────────────────────────────────────────────────┐
 │                                                                         │
-│  Aggregation Layer calls sync(packet)                                   │
-│                          │                                              │
-│                          ▼                                              │
+│  ┌─ Sync Triggers ─────────────────────────────────────────────────────┐│
+│  │                                                                     ││
+│  │  1. Periodic alarm: every 2 hours                                   ││
+│  │  2. Off-browser idle: 10 minutes after leaving the browser          ││
+│  │  3. Recovery: on service worker restart with stale checkpoint       ││
+│  │  4. Suspend: chrome.runtime.onSuspend (best-effort)                 ││
+│  │                                                                     ││
+│  │  All triggers: packer.flush() → if packet → sync(packet)            ││
+│  │                                                                     ││
+│  └──────────────────────────────────────────────────┬──────────────────┘│
+│                                                     │                   │
+│                                                     ▼                   │
 │  ┌─ Sender ────────────────────────────────────────────────────────────┐│
 │  │                                                                     ││
 │  │   POST /api/v1/extension/sync                                       ││
@@ -686,11 +695,71 @@ The service worker doesn't know or care which pipeline produced the Captures. Th
 
 ### Syncing Overview
 
-The Syncing Layer takes a Packet and sends it to the server. Something upstream (session management, manual trigger, etc.) decides *when* to flush — this layer just handles delivery and retry.
+The Syncing Layer takes a Packet and sends it to the server. The Packer builds the Packet; this layer handles delivery and retry.
 
 - `POST /api/v1/extension/sync` with `Authorization: Bearer <token>` and the Packet as the JSON body.
 - On success, done.
 - On failure (network error, 5xx, etc.), the Packet is pushed to a **RetryQueue** persisted in `chrome.storage.local`. Retries with exponential backoff, drops entries older than a max age.
+
+### Sync Triggers
+
+Two `chrome.alarms` control when a flush + sync happens:
+
+**1. Periodic (every 2 hours)** — a repeating alarm that fires regardless of activity. Covers the case where the user is actively browsing for extended periods, or bouncing on/off the browser in short stints (< 10 minutes each) that never trigger the idle flush.
+
+**2. Off-browser idle (10 minutes)** — when the aggregator transitions to `off_browser` (user left the browser), a one-shot alarm is created with a 10-minute delay. If the user returns before it fires, the alarm is cancelled. If the 10 minutes elapse, the alarm fires, triggering a flush and sync.
+
+```text
+User leaves browser
+        │
+        ▼
+  aggregator transitions to off_browser (1s settle)
+        │
+        ▼
+  chrome.alarms.create("sync-idle", { delayInMinutes: 10 })
+        │
+        ├── user returns before 10m ──▶ chrome.alarms.clear("sync-idle")
+        │                                (nothing happens)
+        │
+        └── 10 minutes elapse ──▶ alarm fires ──▶ flush() ──▶ sync()
+```
+
+After an idle flush, the 2-hour periodic alarm resets so there's no redundant flush shortly after the user returns.
+
+`chrome.alarms` has a minimum granularity of ~1 minute in production, so "10 minutes" is approximate — this is acceptable.
+
+### Example: Sync Trigger Setup
+
+```typescript
+const SYNC_PERIODIC_MINUTES = 120;  // 2 hours
+const SYNC_IDLE_MINUTES = 10;       // 10 minutes off-browser
+
+// Periodic alarm — repeats every 2 hours
+chrome.alarms.create("sync-periodic", { periodInMinutes: SYNC_PERIODIC_MINUTES });
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "sync-periodic" || alarm.name === "sync-idle") {
+    const packet = packer.flush();
+    if (packet) sync(packet);
+
+    // reset the periodic alarm after an idle flush so we
+    // don't get a redundant flush shortly after the user returns
+    if (alarm.name === "sync-idle") {
+      chrome.alarms.create("sync-periodic", { periodInMinutes: SYNC_PERIODIC_MINUTES });
+    }
+  }
+});
+```
+
+The off-browser idle alarm is managed by the aggregator's transition callback:
+
+```typescript
+// When the aggregator transitions to off_browser:
+chrome.alarms.create("sync-idle", { delayInMinutes: SYNC_IDLE_MINUTES });
+
+// When the user returns (aggregator transitions away from off_browser):
+chrome.alarms.clear("sync-idle");
+```
 
 ### Syncing Types
 
@@ -722,15 +791,16 @@ async function sync(packet: Packet): Promise<void> {
 }
 ```
 
-## Persistence Layer
+## Checkpointing
 
 ```text
 ┌─ chrome.storage.local ──────────────────────────────────────────────────┐
 │                                                                         │
 │  ┌─ Checkpoint: Aggregator State ──────────────────────────────────────┐│
 │  │  key: "checkpoint"                                                  ││
-│  │  value: { openBundle, sealed[], edges, activeSource, savedAt }      ││
-│  │  written: every N events or every M seconds                         ││
+│  │  value: { openBundle, sealed[], transitions[], activeSource,        ││
+│  │           savedAt }                                                 ││
+│  │  written: every 50 sealed bundles                                   ││
 │  └─────────────────────────────────────────────────────────────────────┘│
 │                                                                         │
 │  ┌─ RetryQueue ────────────────────────────────────────────────────────┐│
@@ -747,39 +817,38 @@ Recovery points:
   3. Sync failed → Packet in RetryQueue → retried on next startup
 ```
 
-### Persistence Overview
+### Checkpointing Overview
 
-Chrome can kill the service worker at any time (idle timeout, update, crash). The browser itself can close without warning. The Persistence Layer ensures no data is silently lost by checkpointing the Aggregator's in-memory state to `chrome.storage.local`.
+Chrome can kill the service worker at any time (idle timeout, update, crash). The browser itself can close without warning. Checkpointing ensures no data is silently lost by writing the Aggregator's in-memory state to `chrome.storage.local`.
 
-**What gets persisted:**
+**What gets checkpointed:**
 
-- The open Bundle (if any)
+- The open Bundle (if any) — full `Bundle` with all `BundleEntry` captures
 - All sealed Bundles not yet flushed
-- The navigation graph edges
+- The raw transition log
 - The active source
 
-**When it gets persisted (checkpointing):**
+**When it gets checkpointed:**
 
-- Every N events (e.g. every 50 Captures)
-- Every M seconds (e.g. every 30 seconds) via `chrome.alarms`
+- Every 50 sealed bundles
 - On `chrome.runtime.onSuspend` (Chrome signals the service worker is about to be killed — best-effort, not guaranteed)
 
 **Recovery scenarios:**
 
-1. **Service worker restarts** (killed by Chrome, extension updated, etc.) — on startup, read the checkpoint from `chrome.storage.local`. Restore `openBundle`, `sealed[]`, `edges`, `activeSource`. Resume as if nothing happened. Events that arrived between the last checkpoint and the kill are lost — this is an acceptable trade-off for simplicity.
+1. **Service worker restarts** (killed by Chrome, extension updated, etc.) — on startup, read the checkpoint from `chrome.storage.local`. Restore `openBundle`, `sealed[]`, `transitions[]`, `activeSource`. Resume as if nothing happened. Events that arrived between the last checkpoint and the kill are lost — this is an acceptable trade-off for simplicity.
 
-2. **Browser closed abruptly** (crash, force quit, shutdown) — on next browser launch, the service worker starts, reads the checkpoint. The stale open Bundle is sealed (its `endedAt` set to `savedAt`). All sealed Bundles are flushed into a Packet and synced. This Packet represents the tail end of the previous session.
+2. **Browser closed abruptly** (crash, force quit, shutdown) — on next browser launch, the service worker starts, reads the checkpoint. The stale open Bundle is sealed (its `endedAt` set to the timestamp of its last capture). All sealed Bundles are flushed into a Packet and synced. This Packet represents the tail end of the previous session.
 
 3. **Sync failure** — the Packet goes to the RetryQueue (already in `chrome.storage.local`). On startup, the RetryQueue is drained before normal operation resumes.
 
-### Persistence Types
+### Checkpoint Type
 
 ```typescript
 type Checkpoint = {
+  activeSource: string | null;
   openBundle: Bundle | null;
   sealed: Bundle[];
-  edges: Edge[];
-  activeSource: string | null;
+  transitions: Transition[];
   savedAt: number;
 };
 ```
@@ -787,24 +856,24 @@ type Checkpoint = {
 ### Example: Checkpointing
 
 ```typescript
-let eventsSinceCheckpoint = 0;
-const CHECKPOINT_INTERVAL = 50; // events
+let sealedSinceCheckpoint = 0;
+const CHECKPOINT_EVERY_N_SEALED = 50;
 
-/** Called by the Aggregator after every incoming event. */
+/** Called by the Bundler every time a bundle is sealed. */
 function maybeCheckpoint(): void {
-  eventsSinceCheckpoint++;
-  if (eventsSinceCheckpoint >= CHECKPOINT_INTERVAL) {
+  sealedSinceCheckpoint++;
+  if (sealedSinceCheckpoint >= CHECKPOINT_EVERY_N_SEALED) {
     checkpoint();
   }
 }
 
 async function checkpoint(): Promise<void> {
-  eventsSinceCheckpoint = 0;
+  sealedSinceCheckpoint = 0;
   const data: Checkpoint = {
+    activeSource,
     openBundle,
     sealed: [...sealed],
-    edges: [...edges.values()],
-    activeSource,
+    transitions: [...transitions],
     savedAt: Date.now(),
   };
   await chrome.storage.local.set({ checkpoint: data });
@@ -822,14 +891,13 @@ async function recover(): Promise<void> {
   // restore state
   activeSource = cp.activeSource;
   sealed.push(...cp.sealed);
-  for (const edge of cp.edges) {
-    edges.set(`${edge.from}→${edge.to}`, edge);
-  }
+  transitions.push(...cp.transitions);
 
   if (cp.openBundle) {
-    // seal the stale open bundle — we don't know when it actually ended,
-    // so use the checkpoint timestamp as best estimate
-    cp.openBundle.endedAt = cp.savedAt;
+    // seal the stale open bundle — use the timestamp of its last capture
+    // as the best estimate of when it actually ended
+    const lastCapture = cp.openBundle.captures.at(-1);
+    cp.openBundle.endedAt = lastCapture?.timestamp ?? cp.savedAt;
     sealed.push(cp.openBundle);
   }
 
@@ -844,19 +912,26 @@ async function recover(): Promise<void> {
 }
 ```
 
-### Periodic checkpoint via chrome.alarms
+### Checkpoint on suspend
 
-`setTimeout` and `setInterval` do not survive service worker restarts. Use `chrome.alarms` for the periodic checkpoint:
+`chrome.runtime.onSuspend` fires when Chrome is about to kill the service worker. Use it as a last-chance checkpoint:
 
 ```typescript
-chrome.alarms.create("checkpoint", { periodInMinutes: 0.5 }); // every 30 seconds
-
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "checkpoint") {
-    checkpoint();
-  }
+chrome.runtime.onSuspend.addListener(() => {
+  checkpoint();
 });
 ```
+
+### Checkpoint dev logs
+
+All checkpoint logs use the `"checkpoint"` dev channel.
+
+| Event                  | When                                           | Data                                                                  |
+| ---------------------- | ---------------------------------------------- | --------------------------------------------------------------------- |
+| `checkpoint.written`   | Checkpoint saved to `chrome.storage.local`     | `{ sealed: number, transitions: number, hasOpenBundle: boolean }`     |
+| `checkpoint.suspend`   | `onSuspend` triggered a last-chance checkpoint | `{ sealed: number, transitions: number, hasOpenBundle: boolean }`     |
+| `checkpoint.recovered` | Checkpoint restored on startup                 | `{ sealed: number, transitions: number, staleBundleSealed: boolean }` |
+| `checkpoint.cleared`   | Checkpoint removed after successful recovery   | `{}`                                                                  |
 
 ## Development Layer
 
