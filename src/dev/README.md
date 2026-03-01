@@ -10,7 +10,7 @@ src/background/main.ts    DevHub host (log buffer, port listener, command handle
 src/dev/
   useDevPort.ts           React hook — port connection, reconnect, batched state
   DevContext.tsx          React context that distributes port state to panels
-  App.tsx                 Dockview shell (Graph, Log, State, Checkpoint panels)
+  App.tsx                 Dockview shell (Graph, Log, Packet, Checkpoint panels)
   panels/                 individual panel components
 ```
 
@@ -63,11 +63,10 @@ Defined in the `port.onMessage.addListener` block inside the `if (import.meta.en
 
 The action commands are exposed as buttons in the devhub panels:
 
-**State panel** toolbar (left side) — `panels/StateInspector.tsx`:
+**Packet panel** toolbar (left side) — `panels/PacketInspector.tsx`:
 
 - **Flush** → `sync.flush` — pack aggregator state into a packet
 - **Send** → `sync.send` — flush + upload
-- **Retry** → `sync.drain_retry` — retry failed uploads
 
 **Checkpoint panel** toolbar (next to refresh/clear) — `panels/CheckpointInspector.tsx`:
 

@@ -1,11 +1,14 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Clipboard, ClipboardCheck } from "lucide-react";
 
+import { writeClipboard } from "@/lib/utils";
+
 type Props = { children: ReactNode };
 type State = { error: Error | null; copied: boolean };
 
 export class ErrorBoundary extends Component<Props, State> {
     state: State = { error: null, copied: false };
+    private copyTimer: ReturnType<typeof setTimeout> | null = null;
 
     static getDerivedStateFromError(error: Error): State {
         return { error, copied: false };
@@ -15,14 +18,22 @@ export class ErrorBoundary extends Component<Props, State> {
         console.error("[ErrorBoundary]", error, info.componentStack);
     }
 
-    private copyError = () => {
+    componentWillUnmount() {
+        if (this.copyTimer) clearTimeout(this.copyTimer);
+    }
+
+    private copyError = async () => {
         const error = this.state.error;
         if (!error) return;
         const text = `${error.name}: ${error.message}\n\n${error.stack ?? ""}`;
-        navigator.clipboard.writeText(text).then(() => {
+        if (await writeClipboard(text)) {
+            if (this.copyTimer) clearTimeout(this.copyTimer);
             this.setState({ copied: true });
-            setTimeout(() => this.setState({ copied: false }), 1500);
-        });
+            this.copyTimer = setTimeout(
+                () => this.setState({ copied: false }),
+                1500,
+            );
+        }
     };
 
     render() {

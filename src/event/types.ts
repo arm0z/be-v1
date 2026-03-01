@@ -256,17 +256,6 @@ interface BaseCapture<T extends string, P> {
     payload: P;
 }
 
-/** Full stamped event: service worker adds tabId, windowId, source. */
-interface BaseEvent<T extends string, P> {
-    timestamp: number;
-    tabId: string;
-    windowId: number;
-    context: string;
-    source: string;
-    type: T;
-    payload: P;
-}
-
 /** What flows through the content-script pipeline (Tap → Adapter → Normalizer → Relay). */
 export type Capture =
     // Layer 4: Keystrokes
@@ -290,45 +279,6 @@ export type Capture =
     // Adapter-specific
     | BaseCapture<"html.content", HTMLContentPayload>
     | BaseCapture<"file.content", FileContentPayload>;
-
-/** All events in the system — content-script captures get stamped by the service worker. */
-export type SessionEvent =
-    // Layer 1: Session Structure
-    | BaseEvent<"window.created", WindowCreatedPayload>
-    | BaseEvent<"window.closed", WindowClosedPayload>
-    | BaseEvent<"window.resized", WindowResizedPayload>
-    | BaseEvent<"tab.created", TabCreatedPayload>
-    | BaseEvent<"tab.closed", TabClosedPayload>
-    // Layer 2: Navigation
-    | BaseEvent<"nav.completed", NavCompletedPayload>
-    | BaseEvent<"nav.spa", NavSpaPayload>
-    | BaseEvent<"nav.title_changed", NavTitleChangedPayload>
-    // Layer 3: Attention
-    | BaseEvent<"attention.visible", AttentionVisiblePayload>
-    // Layer 4: Keystrokes
-    | BaseEvent<"input.keystroke", InputKeystrokePayload>
-    | BaseEvent<"input.keystroke_batch", InputKeystrokeBatchPayload>
-    | BaseEvent<"input.composition", InputCompositionPayload>
-    // Layer 5: Mouse & Touch
-    | BaseEvent<"input.click", InputClickPayload>
-    | BaseEvent<"input.double_click", InputDoubleClickPayload>
-    | BaseEvent<"input.context_menu", InputContextMenuPayload>
-    // Layer 6: Scroll
-    | BaseEvent<"input.scroll", InputScrollPayload>
-    // Layer 7: Selection & Clipboard
-    | BaseEvent<"input.selection", InputSelectionPayload>
-    | BaseEvent<"input.copy", InputCopyPayload>
-    | BaseEvent<"input.paste", InputPastePayload>
-    // Layer 8: Forms
-    | BaseEvent<"input.form_focus", InputFormFocusPayload>
-    | BaseEvent<"input.form_change", InputFormChangePayload>
-    | BaseEvent<"input.form_submit", InputFormSubmitPayload>
-    // Layer 9: Media & Downloads
-    | BaseEvent<"media.audio", MediaAudioPayload>
-    | BaseEvent<"media.download", MediaDownloadPayload>
-    // Adapter-specific
-    | BaseEvent<"html.content", HTMLContentPayload>
-    | BaseEvent<"file.content", FileContentPayload>;
 
 // ── pipeline types ──────────────────────────────────────────────────
 

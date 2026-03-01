@@ -15,6 +15,7 @@ export function createAggregator(): Aggregator {
     >();
 
     function emitState() {
+        if (!import.meta.env.DEV) return;
         dev.log("aggregator", "state.snapshot", "state", {
             activeSource: bundler.getActiveSource(),
             openBundle: bundler.getOpenBundle(),

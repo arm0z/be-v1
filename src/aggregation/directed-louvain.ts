@@ -129,6 +129,11 @@ export function directedLouvain(
         const nodeList = [...currentNodes];
 
         for (let iter = 0; iter < MAX_LOCAL_ITERATIONS; iter++) {
+            // Fisher-Yates shuffle to avoid order-dependent bias
+            for (let j = nodeList.length - 1; j > 0; j--) {
+                const k = Math.floor(Math.random() * (j + 1));
+                [nodeList[j], nodeList[k]] = [nodeList[k], nodeList[j]];
+            }
             let improved = false;
 
             for (const node of nodeList) {

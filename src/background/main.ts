@@ -349,7 +349,7 @@ chrome.downloads.onChanged.addListener((delta) => {
                     state: delta.state!.current!,
                 },
             },
-            "unknown",
+            String(previousActiveTabId ?? "unknown"),
         );
     });
 });
@@ -396,7 +396,6 @@ aggregator.onSeal(() => checkpointer.onBundleSealed());
 // Last-chance checkpoint + flush on suspend
 chrome.runtime.onSuspend.addListener(() => {
     checkpointer.saveSuspend();
-    flushAndSync();
 });
 
 // Recovery on startup, then drain retry queue

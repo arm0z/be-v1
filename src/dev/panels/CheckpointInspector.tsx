@@ -1,7 +1,5 @@
 import {
     Braces,
-    ChevronsDownUp,
-    ChevronsUpDown,
     CircleOff,
     HardDrive,
     LayoutList,
@@ -17,177 +15,25 @@ import {
     TooltipContent,
     TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { JsonTreeView } from "../components/JsonTreeView";
+import { Row } from "../components/Row";
+import { formatDuration, formatTime } from "../lib/format";
 import { toast } from "sonner";
-
-// ── Helpers ──────────────────────────────────────────────────────────
-
-function formatTime(ms: number): string {
-    return new Date(ms).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-    });
-}
-
-function formatDuration(ms: number): string {
-    const s = Math.floor(ms / 1000);
-    if (s < 60) return `${s}s`;
-    const m = Math.floor(s / 60);
-    const rs = s % 60;
-    if (m < 60) return `${m}m ${rs}s`;
-    const h = Math.floor(m / 60);
-    const rm = m % 60;
-    return `${h}h ${rm}m`;
-}
 
 function SourceLabel({ source }: { source: string }) {
     return <span className="font-mono">{source}</span>;
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-    return (
-        <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">{label}</span>
-            <span className="font-mono">{value}</span>
-        </div>
-    );
-}
-
-// ── JSON Tree (same pattern as StateInspector) ──────────────────────
-
-type TreeReset = number;
-
-function PrimitiveValue({ value }: { value: unknown }) {
-    if (value === null)
-        return <span className="text-muted-foreground italic">null</span>;
-    if (typeof value === "string")
-        return <span className="text-green-400">"{value}"</span>;
-    if (typeof value === "number")
-        return <span className="text-blue-400">{value}</span>;
-    if (typeof value === "boolean")
-        return <span className="text-amber-400">{String(value)}</span>;
-    return <span>{String(value)}</span>;
-}
-
-function JsonNode({
-    label,
-    value,
-    depth = 0,
-    reset,
+function FormattedCheckpoint({
+    cp,
+    age,
 }: {
-    label?: string;
-    value: unknown;
-    depth?: number;
-    reset: TreeReset;
+    cp: Checkpoint;
+    age: string;
 }) {
-    const isObject = value !== null && typeof value === "object";
-    const isArray = Array.isArray(value);
-
-    const expandAll = reset % 2 === 1;
-    const defaultOpen = expandAll || depth < 2;
-    const [open, setOpen] = useState(defaultOpen);
-
-    if (!isObject) {
-        return (
-            <div className="flex items-baseline gap-1.5 py-px">
-                {label != null && (
-                    <span className="text-muted-foreground shrink-0">
-                        {label}:
-                    </span>
-                )}
-                <PrimitiveValue value={value} />
-            </div>
-        );
-    }
-
-    const entries: [string, unknown][] = isArray
-        ? value.map((v, i) => [String(i), v] as [string, unknown])
-        : Object.entries(value as Record<string, unknown>);
-    const summary = isArray ? `[${entries.length}]` : `{${entries.length}}`;
-
-    if (entries.length === 0) {
-        return (
-            <div className="flex items-baseline gap-1.5 py-px">
-                {label != null && (
-                    <span className="text-muted-foreground shrink-0">
-                        {label}:
-                    </span>
-                )}
-                <span className="text-muted-foreground">
-                    {isArray ? "[]" : "{}"}
-                </span>
-            </div>
-        );
-    }
-
-    return (
-        <div>
-            <button
-                type="button"
-                onClick={() => setOpen(!open)}
-                className="flex items-baseline gap-1.5 py-px rounded px-1 -ml-1 hover:bg-muted/30"
-            >
-                <span className="text-muted-foreground text-[10px] w-2.5 shrink-0">
-                    {open ? "▼" : "▶"}
-                </span>
-                {label != null && (
-                    <span className="text-muted-foreground">{label}:</span>
-                )}
-                {!open && (
-                    <span className="text-muted-foreground/60">{summary}</span>
-                )}
-            </button>
-            {open && (
-                <div className="ml-2 border-l border-border/50 pl-3">
-                    {entries.map(([k, v]) => (
-                        <JsonNode
-                            key={k}
-                            label={k}
-                            value={v}
-                            depth={depth + 1}
-                            reset={reset}
-                        />
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-}
-
-function JsonTreeView({ data }: { data: unknown }) {
-    const [reset, setReset] = useState(0);
-    const collapseAll = useCallback(
-        () => setReset((r) => (r % 2 === 0 ? r + 2 : r + 1)),
-        [],
-    );
-    const expandAll = useCallback(
-        () => setReset((r) => (r % 2 === 1 ? r + 2 : r + 1)),
-        [],
-    );
-
-    return (
-        <div className="font-mono text-sm">
-            <div className="mb-3 flex items-center justify-end gap-1">
-                <Button variant="ghost" size="xs" onClick={expandAll}>
-                    <ChevronsUpDown className="h-3 w-3" />
-                    Expand all
-                </Button>
-                <Button variant="ghost" size="xs" onClick={collapseAll}>
-                    <ChevronsDownUp className="h-3 w-3" />
-                    Collapse all
-                </Button>
-            </div>
-            <JsonNode key={reset} value={data} reset={reset} />
-        </div>
-    );
-}
-
-// ── Formatted View ──────────────────────────────────────────────────
-
-function FormattedCheckpoint({ cp }: { cp: Checkpoint }) {
     return (
         <div className="space-y-5">
             {/* Saved At */}
@@ -199,9 +45,7 @@ function FormattedCheckpoint({ cp }: { cp: Checkpoint }) {
             {/* Age */}
             <div className="flex items-center justify-between rounded-md border p-3 text-sm">
                 <span className="text-muted-foreground">Age</span>
-                <span className="font-mono">
-                    {formatDuration(Date.now() - cp.savedAt)}
-                </span>
+                <span className="font-mono">{age}</span>
             </div>
 
             {/* Active Source */}
@@ -335,6 +179,11 @@ function TransitionList({ transitions }: { transitions: Transition[] }) {
 
 // ── Storage hook ────────────────────────────────────────────────────
 
+// This hook reads directly from chrome.storage.local rather than through
+// DevContext/port. This is intentional: the checkpoint is a raw storage
+// artifact, not a streamed event. Consequence: checkpoint data is not
+// subject to the DevHub filter/replay mechanism. The chrome.storage.onChanged
+// listener provides live reactivity independently.
 function useCheckpointStorage() {
     const [cp, setCp] = useState<Checkpoint | null>(null);
     const [loading, setLoading] = useState(true);
@@ -409,10 +258,17 @@ export function CheckpointInspector({
     const [format, setFormat] = useState("formatted");
     const { cp, loading, refresh, clear } = useCheckpointStorage();
 
-    const age = useMemo(
-        () => (cp ? formatDuration(Date.now() - cp.savedAt) : null),
-        [cp],
-    );
+    const [age, setAge] = useState<string | null>(null);
+    useEffect(() => {
+        if (!cp) {
+            setAge(null);
+            return;
+        }
+        const update = () => setAge(formatDuration(Date.now() - cp.savedAt));
+        update();
+        const id = setInterval(update, 30_000);
+        return () => clearInterval(id);
+    }, [cp]);
 
     return (
         <div className="flex h-full flex-col overflow-hidden">
@@ -506,7 +362,7 @@ export function CheckpointInspector({
                     <JsonTreeView data={cp} />
                 )}
                 {!loading && cp && format === "formatted" && (
-                    <FormattedCheckpoint cp={cp} />
+                    <FormattedCheckpoint cp={cp} age={age ?? "0s"} />
                 )}
             </div>
         </div>

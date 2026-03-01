@@ -18,6 +18,14 @@ from flask import Flask, g, jsonify, redirect, request
 
 app = Flask(__name__)
 
+
+@app.after_request
+def cors(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    return response
+
 DB_PATH = os.path.join(os.path.dirname(__file__), "data.db")
 
 TW_HEAD = """<script src="https://cdn.tailwindcss.com"></script>
@@ -118,7 +126,7 @@ def escape_html(text: str) -> str:
 # ── Routes ──────────────────────────────────────────────────────────
 
 
-@app.route("/api/v0/packets", methods=["POST"])
+@app.route("/api/v1/extension/sync", methods=["POST"])
 def record() -> tuple:
     """Receive a Packet from packer.ts."""
     data = request.get_json(silent=True)

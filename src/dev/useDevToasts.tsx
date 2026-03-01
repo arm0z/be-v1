@@ -30,6 +30,13 @@ export function useDevToasts(entries: DevEntry[]): void {
             return;
         }
 
+        const newCount = entries.length - processedRef.current;
+        if (newCount > 10) {
+            // Large batch — likely a replay or reconnect, skip toasting
+            processedRef.current = entries.length;
+            return;
+        }
+
         for (let i = processedRef.current; i < entries.length; i++) {
             const e = entries[i];
             if (!e.event) continue;

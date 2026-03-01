@@ -17,6 +17,10 @@ export const registry: Route[] = [
         build: () => relay(normalizer(fileAdapter(tap()))),
     },
     {
+        match: (url) => url.startsWith("https://outlook.office.com/mail/"),
+        build: () => relay(normalizer(tap())),
+    },
+    {
         // catch-all: generic web
         match: () => true,
         // TODO: remove htmlAdapter and add other whitelisted

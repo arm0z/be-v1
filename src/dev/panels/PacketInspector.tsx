@@ -21,168 +21,10 @@ import { useCallback, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import type { DevEntry } from "@/event/dev";
-import { writeClipboard } from "@/lib/utils";
-
-// ── Helpers ──────────────────────────────────────────────────────────
-
-function formatTime(ms: number): string {
-    return new Date(ms).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-    });
-}
-
-function formatDuration(ms: number): string {
-    const s = Math.floor(ms / 1000);
-    if (s < 60) return `${s}s`;
-    const m = Math.floor(s / 60);
-    const rs = s % 60;
-    if (m < 60) return `${m}m ${rs}s`;
-    const h = Math.floor(m / 60);
-    const rm = m % 60;
-    return `${h}h ${rm}m`;
-}
-
-// ── JSON Tree (shared with StateInspector) ──────────────────────────
-
-type TreeReset = number;
-
-function PrimitiveValue({ value }: { value: unknown }) {
-    if (value === null)
-        return <span className="text-muted-foreground italic">null</span>;
-    if (typeof value === "string")
-        return <span className="text-green-400">"{value}"</span>;
-    if (typeof value === "number")
-        return <span className="text-blue-400">{value}</span>;
-    if (typeof value === "boolean")
-        return <span className="text-amber-400">{String(value)}</span>;
-    return <span>{String(value)}</span>;
-}
-
-function JsonNode({
-    label,
-    value,
-    depth = 0,
-    reset,
-}: {
-    label?: string;
-    value: unknown;
-    depth?: number;
-    reset: TreeReset;
-}) {
-    const isObject = value !== null && typeof value === "object";
-    const isArray = Array.isArray(value);
-
-    const expandAll = reset % 2 === 1;
-    const defaultOpen = expandAll || depth < 2;
-    const [open, setOpen] = useState(defaultOpen);
-
-    if (!isObject) {
-        return (
-            <div className="flex items-baseline gap-1.5 py-px">
-                {label != null && (
-                    <span className="text-muted-foreground shrink-0">
-                        {label}:
-                    </span>
-                )}
-                <PrimitiveValue value={value} />
-            </div>
-        );
-    }
-
-    const entries: [string, unknown][] = isArray
-        ? value.map((v, i) => [String(i), v] as [string, unknown])
-        : Object.entries(value as Record<string, unknown>);
-    const summary = isArray ? `[${entries.length}]` : `{${entries.length}}`;
-
-    if (entries.length === 0) {
-        return (
-            <div className="flex items-baseline gap-1.5 py-px">
-                {label != null && (
-                    <span className="text-muted-foreground shrink-0">
-                        {label}:
-                    </span>
-                )}
-                <span className="text-muted-foreground">
-                    {isArray ? "[]" : "{}"}
-                </span>
-            </div>
-        );
-    }
-
-    return (
-        <div>
-            <button
-                type="button"
-                onClick={() => setOpen(!open)}
-                className="-ml-1 flex items-baseline gap-1.5 rounded px-1 py-px hover:bg-muted/30"
-            >
-                <span className="w-2.5 shrink-0 text-[10px] text-muted-foreground">
-                    {open ? "▼" : "▶"}
-                </span>
-                {label != null && (
-                    <span className="text-muted-foreground">{label}:</span>
-                )}
-                {!open && (
-                    <span className="text-muted-foreground/60">{summary}</span>
-                )}
-            </button>
-            {open && (
-                <div className="ml-2 border-l border-border/50 pl-3">
-                    {entries.map(([k, v]) => (
-                        <JsonNode
-                            key={k}
-                            label={k}
-                            value={v}
-                            depth={depth + 1}
-                            reset={reset}
-                        />
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-}
-
-function JsonTreeView({ data }: { data: unknown }) {
-    const [reset, setReset] = useState(0);
-    const collapseAll = useCallback(
-        () => setReset((r) => (r % 2 === 0 ? r + 2 : r + 1)),
-        [],
-    );
-    const expandAll = useCallback(
-        () => setReset((r) => (r % 2 === 1 ? r + 2 : r + 1)),
-        [],
-    );
-
-    return (
-        <div className="font-mono text-sm">
-            <div className="mb-3 flex items-center justify-end gap-1">
-                <Button variant="ghost" size="xs" onClick={expandAll}>
-                    <ChevronsUpDown className="h-3 w-3" />
-                    Expand all
-                </Button>
-                <Button variant="ghost" size="xs" onClick={collapseAll}>
-                    <ChevronsDownUp className="h-3 w-3" />
-                    Collapse all
-                </Button>
-            </div>
-            <JsonNode key={reset} value={data} reset={reset} />
-        </div>
-    );
-}
-
-// ── Formatted View ───────────────────────────────────────────────────
-
-function Row({ label, value }: { label: string; value: string }) {
-    return (
-        <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">{label}</span>
-            <span className="font-mono">{value}</span>
-        </div>
-    );
-}
+import { JsonTreeView } from "../components/JsonTreeView";
+import { Row } from "../components/Row";
+import { formatDuration, formatTime } from "../lib/format";
+import { useCopyFeedback } from "../hooks/useCopyFeedback";
 
 function groupToMarkdown(g: Group, i: number): string {
     const lines = [`## Group #${i} — ${g.meta.sources.join(", ")}`];
@@ -199,21 +41,14 @@ function groupToMarkdown(g: Group, i: number): string {
 }
 
 function CopyGroupButton({ group, index }: { group: Group; index: number }) {
-    const [copied, setCopied] = useState(false);
+    const { copied, copy } = useCopyFeedback();
     return (
         <Tooltip>
             <TooltipTrigger asChild>
                 <Button
                     variant="ghost"
                     size="icon-xs"
-                    onClick={async () => {
-                        if (
-                            await writeClipboard(groupToMarkdown(group, index))
-                        ) {
-                            setCopied(true);
-                            setTimeout(() => setCopied(false), 1500);
-                        }
-                    }}
+                    onClick={() => copy(groupToMarkdown(group, index))}
                     className="text-muted-foreground"
                 >
                     {copied ? (

@@ -1,6 +1,7 @@
 import type {
     Capture,
     ClickTarget,
+    FormFieldInfo,
     FormTarget,
     InputClickPayload,
     InputCompositionPayload,
@@ -436,11 +437,7 @@ function formInfo(el: Element): InputFormFocusPayload["form"] | undefined {
             ? el.form
             : null;
     if (!form) return undefined;
-    const fields: InputFormFocusPayload["form"] extends
-        | { fields: infer F }
-        | undefined
-        ? F
-        : never = [];
+    const fields: FormFieldInfo[] = [];
     let count = 0;
     for (const field of form.elements) {
         if (

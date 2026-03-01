@@ -1,5 +1,3 @@
-// TODO: impl
-
 import type { Adapter, FileContentPayload } from "../types.ts";
 import { dev } from "../dev.ts";
 
@@ -137,7 +135,6 @@ const IMAGE_EXTS = new Set([
     "avif",
     "tiff",
     "tif",
-    "svg",
     "heic",
     "heif",
 ]);
@@ -232,7 +229,9 @@ async function extractPdfText(url: string): Promise<string> {
             .join(" ");
         byteLen += pageText.length;
         if (byteLen > MAX_BYTES) {
-            chunks.push(pageText.slice(0, byteLen - MAX_BYTES));
+            chunks.push(
+                pageText.slice(0, pageText.length - (byteLen - MAX_BYTES)),
+            );
             break;
         }
         chunks.push(pageText);

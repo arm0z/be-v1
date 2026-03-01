@@ -16,14 +16,13 @@ export default defineManifest({
     },
     permissions: [
         "alarms",
-        "contentSettings",
         "storage",
         "tabs",
         "webNavigation",
-        "idle",
         "downloads",
         "windows",
     ],
+    host_permissions: ["http://localhost:5000/*"],
     background: {
         service_worker: "src/background/main.ts",
         type: "module",

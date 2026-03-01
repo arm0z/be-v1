@@ -122,6 +122,8 @@ const panelDefs = [
     { type: "checkpoint", component: "checkpoint", title: "Checkpoint" },
 ] as const;
 
+// Module-level counter for unique panel IDs. Under StrictMode double-mount,
+// IDs may be non-sequential — this is cosmetic-only with no functional impact.
 let nextId = 0;
 
 /* ── header menu ──────────────────────────────────────────────── */

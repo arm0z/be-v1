@@ -1,8 +1,9 @@
 import type { Aggregator, Checkpoint } from "./types.ts";
+
 import { dev } from "../event/dev.ts";
 
 const STORAGE_KEY = "checkpoint";
-const CHECKPOINT_EVERY_N_SEALED = 50;
+const CHECKPOINT_EVERY_N_SEALED = 15;
 
 export function createCheckpointer(aggregator: Aggregator) {
     let sealedSinceCheckpoint = 0;

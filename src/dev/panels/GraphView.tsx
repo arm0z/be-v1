@@ -35,8 +35,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import type { DevEntry } from "@/event/dev";
+import { EdgeTable } from "./EdgeTable";
 import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
+import { formatDwell, formatTime } from "../lib/format";
 import { preprocess } from "@/aggregation/preprocess";
 
 type Props = {
@@ -69,14 +71,6 @@ const HIT_RADIUS = 16;
 const DOT_SPACING = 24;
 const MAX_DOTS = 5000;
 
-function fmtTime(ts: number): string {
-    return new Date(ts).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-    });
-}
-
 const COMMUNITY_COLORS = [
     "hsl(210, 80%, 60%)",
     "hsl(150, 70%, 50%)",
@@ -88,7 +82,7 @@ const COMMUNITY_COLORS = [
     "hsl(330, 70%, 60%)",
 ];
 
-function getCommunityColor(
+export function getCommunityColor(
     communityId: string,
     communityIds: string[],
 ): string {
@@ -135,12 +129,6 @@ function convexHull(points: [number, number][]): [number, number][] {
     return lower.concat(upper);
 }
 
-function fmtDwell(ms: number): string {
-    if (ms < 1000) return `${ms}ms`;
-    if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-    return `${(ms / 60_000).toFixed(1)}m`;
-}
-
 const MIN_DWELL_MS = 5000;
 
 function collapseShortDwells(transitions: Transition[]): Transition[] {
@@ -172,7 +160,7 @@ function extractHostname(source: string): string {
 }
 
 /** Consistent color for a node based on its source name. */
-function nodeColor(source: string): string {
+export function nodeColor(source: string): string {
     let hash = 0;
     for (let i = 0; i < source.length; i++) {
         hash = ((hash << 5) - hash + source.charCodeAt(i)) | 0;
@@ -181,252 +169,6 @@ function nodeColor(source: string): string {
     if (source === "off_browser" || source === "unknown")
         return "hsl(0, 0%, 45%)";
     return `hsl(${hue}, 65%, 55%)`;
-}
-
-type EdgeTableProps = {
-    transitions: Transition[];
-    grouped: boolean;
-    louvain: LouvainResult | null;
-    sourceUrls: Record<string, string>;
-};
-
-function SourceCell({
-    id,
-    urls,
-}: {
-    id: string;
-    urls: Record<string, string>;
-}) {
-    const url = urls[id] ?? "";
-    return (
-        <span className="flex flex-col leading-tight">
-            <span className="truncate" style={{ maxWidth: 200 }} title={id}>
-                {id}
-            </span>
-            {url && (
-                <span
-                    className="truncate text-[10px] text-muted-foreground"
-                    style={{ maxWidth: 200 }}
-                    title={url}
-                >
-                    {url}
-                </span>
-            )}
-        </span>
-    );
-}
-
-function EdgeTable({
-    transitions,
-    grouped,
-    louvain,
-    sourceUrls,
-}: EdgeTableProps) {
-    if (transitions.length === 0) {
-        return (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                No edge data yet — edges appear as transitions flow
-            </div>
-        );
-    }
-
-    // Aggregate transitions into edges
-    const aggregated = new Map<string, Edge>();
-    const nodeSet = new Set<string>();
-    for (const t of transitions) {
-        nodeSet.add(t.from);
-        nodeSet.add(t.to);
-        const key = `${t.from}->${t.to}`;
-        const existing = aggregated.get(key);
-        if (existing) {
-            existing.weight++;
-        } else {
-            aggregated.set(key, { from: t.from, to: t.to, weight: 1 });
-        }
-    }
-
-    // --- Grouped mode: same layout as raw, but with community colors ---
-    if (grouped && louvain) {
-        const uniqueCommunities = [...new Set(louvain.communities.values())];
-
-        function communityColor(id: string): string {
-            const community = louvain!.communities.get(id);
-            return community
-                ? getCommunityColor(community, uniqueCommunities)
-                : "hsl(0,0%,45%)";
-        }
-
-        return (
-            <div className="dev-scrollbar flex h-full flex-col overflow-y-auto">
-                {/* Nodes strip */}
-                <div className="flex flex-wrap gap-1.5 border-b border-border/50 px-3 py-2">
-                    {[...nodeSet].map((id) => (
-                        <span
-                            key={id}
-                            className="inline-flex items-center gap-1 rounded-full border border-border/50 px-2 py-0.5 text-[11px]"
-                        >
-                            <span
-                                className="inline-block size-2 shrink-0 rounded-full"
-                                style={{ backgroundColor: communityColor(id) }}
-                            />
-                            <SourceCell id={id} urls={sourceUrls} />
-                        </span>
-                    ))}
-                </div>
-
-                <table className="w-full text-xs">
-                    <thead className="sticky top-0 z-10 bg-background">
-                        <tr className="border-b border-border/50 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-                            <th className="px-3 py-1.5 font-medium">#</th>
-                            <th className="px-3 py-1.5 font-medium">From</th>
-                            <th className="px-1 py-1.5 font-medium" />
-                            <th className="px-3 py-1.5 font-medium">To</th>
-                            <th className="px-3 py-1.5 text-right font-medium">
-                                Dwell
-                            </th>
-                            <th className="px-3 py-1.5 text-right font-medium">
-                                Time
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {transitions.map((t, i) => (
-                            <tr
-                                key={i}
-                                className="border-b border-border/20 hover:bg-muted/20"
-                            >
-                                <td className="px-3 py-1.5 tabular-nums text-muted-foreground">
-                                    {i + 1}
-                                </td>
-                                <td className="px-3 py-1.5">
-                                    <span className="inline-flex items-center gap-1.5">
-                                        <span
-                                            className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
-                                            style={{
-                                                backgroundColor: communityColor(
-                                                    t.from,
-                                                ),
-                                            }}
-                                        />
-                                        <SourceCell
-                                            id={t.from}
-                                            urls={sourceUrls}
-                                        />
-                                    </span>
-                                </td>
-                                <td className="px-1 py-1.5 text-muted-foreground">
-                                    &rarr;
-                                </td>
-                                <td className="px-3 py-1.5">
-                                    <span className="inline-flex items-center gap-1.5">
-                                        <span
-                                            className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
-                                            style={{
-                                                backgroundColor: communityColor(
-                                                    t.to,
-                                                ),
-                                            }}
-                                        />
-                                        <SourceCell
-                                            id={t.to}
-                                            urls={sourceUrls}
-                                        />
-                                    </span>
-                                </td>
-                                <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-                                    {fmtDwell(t.dwellMs)}
-                                </td>
-                                <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-                                    {fmtTime(t.ts)}
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-        );
-    }
-
-    // --- Raw mode: flat table of all transitions ---
-    return (
-        <div className="dev-scrollbar flex h-full flex-col overflow-y-auto">
-            {/* Nodes strip */}
-            <div className="flex flex-wrap gap-1.5 border-b border-border/50 px-3 py-2">
-                {[...nodeSet].map((id) => (
-                    <span
-                        key={id}
-                        className="inline-flex items-center gap-1 rounded-full border border-border/50 px-2 py-0.5 text-[11px]"
-                    >
-                        <span
-                            className="inline-block size-2 shrink-0 rounded-full"
-                            style={{ backgroundColor: nodeColor(id) }}
-                        />
-                        <SourceCell id={id} urls={sourceUrls} />
-                    </span>
-                ))}
-            </div>
-
-            <table className="w-full text-xs">
-                <thead className="sticky top-0 z-10 bg-background">
-                    <tr className="border-b border-border/50 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-                        <th className="px-3 py-1.5 font-medium">#</th>
-                        <th className="px-3 py-1.5 font-medium">From</th>
-                        <th className="px-1 py-1.5 font-medium" />
-                        <th className="px-3 py-1.5 font-medium">To</th>
-                        <th className="px-3 py-1.5 text-right font-medium">
-                            Dwell
-                        </th>
-                        <th className="px-3 py-1.5 text-right font-medium">
-                            Time
-                        </th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {transitions.map((t, i) => (
-                        <tr
-                            key={i}
-                            className="border-b border-border/20 hover:bg-muted/20"
-                        >
-                            <td className="px-3 py-1.5 tabular-nums text-muted-foreground">
-                                {i + 1}
-                            </td>
-                            <td className="px-3 py-1.5">
-                                <span className="inline-flex items-center gap-1.5">
-                                    <span
-                                        className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
-                                        style={{
-                                            backgroundColor: nodeColor(t.from),
-                                        }}
-                                    />
-                                    <SourceCell id={t.from} urls={sourceUrls} />
-                                </span>
-                            </td>
-                            <td className="px-1 py-1.5 text-muted-foreground">
-                                &rarr;
-                            </td>
-                            <td className="px-3 py-1.5">
-                                <span className="inline-flex items-center gap-1.5">
-                                    <span
-                                        className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
-                                        style={{
-                                            backgroundColor: nodeColor(t.to),
-                                        }}
-                                    />
-                                    <SourceCell id={t.to} urls={sourceUrls} />
-                                </span>
-                            </td>
-                            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-                                {fmtDwell(t.dwellMs)}
-                            </td>
-                            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-                                {fmtTime(t.ts)}
-                            </td>
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-        </div>
-    );
 }
 
 export function GraphView({ entries, onClear, onSend }: Props) {
@@ -1581,7 +1323,7 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                         </span>
                         <span className="text-muted-foreground">Dwell</span>
                         <span className="text-right tabular-nums">
-                            {fmtDwell(stats.totalDwellMs)}
+                            {formatDwell(stats.totalDwellMs)}
                         </span>
                     </div>
 
@@ -1633,11 +1375,11 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                     <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-0.5 border-t border-border/30 pt-2 text-muted-foreground">
                         <span>First seen</span>
                         <span className="text-right tabular-nums text-foreground">
-                            {fmtTime(node.firstSeen)}
+                            {formatTime(node.firstSeen)}
                         </span>
                         <span>Last active</span>
                         <span className="text-right tabular-nums text-foreground">
-                            {fmtTime(node.lastSeen)}
+                            {formatTime(node.lastSeen)}
                         </span>
                     </div>
                 </div>
@@ -1659,6 +1401,8 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                         <canvas
                             ref={canvasRef}
                             className="block h-full w-full"
+                            role="img"
+                            aria-label="Source transition graph visualization"
                         />
                         {tooltipContent}
                     </>

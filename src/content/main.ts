@@ -18,7 +18,7 @@ function bootstrap(): void {
     let currentRoute = route;
 
     if (needsSpaObserver(url)) {
-        observeSpaNavigation((newUrl) => {
+        const teardownSpa = observeSpaNavigation((newUrl) => {
             const next = registry.find((r) => r.match(newUrl));
             if (next && next !== currentRoute) {
                 teardown();
@@ -26,6 +26,13 @@ function bootstrap(): void {
                 teardown = next.build();
             }
         });
+
+        // Store original teardown so SPA patches are restored alongside route teardown
+        const originalTeardown = teardown;
+        teardown = () => {
+            teardownSpa();
+            originalTeardown();
+        };
     }
 }
 

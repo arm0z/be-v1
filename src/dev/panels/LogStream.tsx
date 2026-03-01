@@ -34,6 +34,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { useCopyFeedback } from "../hooks/useCopyFeedback";
 
 // ── Constants ────────────────────────────────────────────
 
@@ -98,17 +99,14 @@ function groupConsecutive(entries: DevEntry[]): LogGroup[] {
 // ── Sub-components ───────────────────────────────────────
 
 function CopyButton({ text, className }: { text: string; className?: string }) {
-    const [copied, setCopied] = useState(false);
+    const { copied, copy } = useCopyFeedback();
 
     const handleCopy = useCallback(
-        async (e: React.MouseEvent) => {
+        (e: React.MouseEvent) => {
             e.stopPropagation();
-            if (await writeClipboard(text)) {
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-            }
+            copy(text);
         },
-        [text],
+        [text, copy],
     );
 
     return (
@@ -245,15 +243,12 @@ function LogToolbar({
     setEventFilter: (events: Partial<Record<string, boolean>>) => void;
     onClear: () => void;
 }) {
-    const [copyFeedback, setCopyFeedback] = useState(false);
+    const { copied: copyFeedback, copy: copyText } = useCopyFeedback();
 
-    const handleCopyTitles = useCallback(async () => {
+    const handleCopyTitles = useCallback(() => {
         const titles = filtered.map(formatEntryTitle).join("\n");
-        if (await writeClipboard(titles)) {
-            setCopyFeedback(true);
-            setTimeout(() => setCopyFeedback(false), 1500);
-        }
-    }, [filtered]);
+        copyText(titles);
+    }, [filtered, copyText]);
 
     return (
         <div className="flex items-center gap-2 border-b bg-background px-3 py-1.5">
@@ -718,6 +713,8 @@ export function LogStream({
                             : "No entries match the current filters."}
                     </p>
                 ) : (
+                    /* MAX_ENTRIES cap (upstream) is the performance safeguard.
+                       Consider virtualization if the cap increases significantly. */
                     <div className="divide-y pb-16">
                         {groups.map((group) =>
                             group.entries.length === 1 ? (

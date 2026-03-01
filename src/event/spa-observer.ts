@@ -13,19 +13,30 @@ export function needsSpaObserver(url: string): boolean {
 /**
  * Monkey-patches history.pushState / replaceState and listens for popstate.
  * Calls `onNavigate` with the new URL on every SPA route change.
+ * Returns a teardown function that restores the original methods.
  */
-export function observeSpaNavigation(onNavigate: (url: string) => void): void {
-    const originalPush = history.pushState.bind(history);
+export function observeSpaNavigation(
+    onNavigate: (url: string) => void,
+): () => void {
+    const origPush = history.pushState;
+    const origReplace = history.replaceState;
+
     history.pushState = (...args) => {
-        originalPush(...args);
+        origPush.apply(history, args);
         onNavigate(window.location.href);
     };
 
-    const originalReplace = history.replaceState.bind(history);
     history.replaceState = (...args) => {
-        originalReplace(...args);
+        origReplace.apply(history, args);
         onNavigate(window.location.href);
     };
 
-    window.addEventListener("popstate", () => onNavigate(window.location.href));
+    const popHandler = () => onNavigate(window.location.href);
+    window.addEventListener("popstate", popHandler);
+
+    return () => {
+        history.pushState = origPush;
+        history.replaceState = origReplace;
+        window.removeEventListener("popstate", popHandler);
+    };
 }
