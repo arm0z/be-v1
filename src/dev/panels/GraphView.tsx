@@ -647,6 +647,15 @@ export function GraphView({ entries, onClear, onSend }: Props) {
         const connectedSet = new Set<string>();
         if (focus) {
             connectedSet.add(hoverId);
+            // In grouped mode, show all community members + neighbors
+            if (activeTabRef.current === "grouped" && gr) {
+                const hoveredCommunity = gr.louvain.communities.get(hoverId);
+                if (hoveredCommunity !== undefined) {
+                    for (const [nodeId, cId] of gr.louvain.communities) {
+                        if (cId === hoveredCommunity) connectedSet.add(nodeId);
+                    }
+                }
+            }
             for (const edge of edges) {
                 if (edge.from === hoverId) connectedSet.add(edge.to);
                 if (edge.to === hoverId) connectedSet.add(edge.from);

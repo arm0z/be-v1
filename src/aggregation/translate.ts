@@ -124,7 +124,7 @@ function translateEntry(c: BundleEntry): string | null {
                     `  ${p.attachments.length} attachments: ${truncateList(p.attachments)}`,
                 );
             if (p.body)
-                lines.push(`  ${truncate(p.body, 500, { fromCenter: true })}`);
+                lines.push(`  ${truncate(p.body, 1000, { fromCenter: true })}`);
             return lines.join("\n");
         }
 

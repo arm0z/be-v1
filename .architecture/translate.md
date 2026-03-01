@@ -89,7 +89,7 @@ Each capture type maps to a specific text format:
 | `outlook.navigate` | `nav folder messageId?`                                                                                   | messageId: 20 chars end                                                |
 | `outlook.send`     | `send email`                                                                                              | none                                                                   |
 | `outlook.discard`  | `discard draft`                                                                                           | none                                                                   |
-| `outlook.content`  | `email (mode) "subject"\n  from: …\n  to: …\n  cc: …\n  N attachments: …\n  body` (empty fields omitted) | subject: 40 end, body: 500 center, recipients/attachments: 3 shown +N |
+| `outlook.content`  | `email (mode) "subject"\n  from: …\n  to: …\n  cc: …\n  N attachments: …\n  body` (empty fields omitted) | subject: 40 end, body: 1000 center, recipients/attachments: 3 shown +N |
 
 #### Signal types (service-worker-originated)
 
@@ -131,7 +131,7 @@ Note how empty form fields (Title, Description) are omitted, and the `[14:33]` h
 - **Collapse consecutive duplicates.** Runs of the same collapsible type are reduced to the last entry. Five scroll events become one final scroll position; periodic email snapshots collapse to the latest draft. Only positional/state/snapshot types collapse — action types (clicks, keystrokes, form changes) never collapse.
 - **Omit empty form fields.** Fields with no value, no selection, and no checked state are skipped entirely. A mostly-empty 20-field form renders as 2–3 lines instead of 20. Only fields with actual content are useful to the LLM.
 - **Full page/file text.** `html.content` and `file.content` text bodies are preserved in full — no truncation. The LLM needs complete page context to understand user actions.
-- **Truncated email snapshots.** `outlook.content` is heavily truncated: subject to 40 chars, body to 500 chars (center), recipients and attachments show the first 3 items with `[+N]` for overflow. Unlike generic page content, email snapshots fire repeatedly (periodic T5 snapshots) and the structured fields convey enough signal without full-length values.
+- **Truncated email snapshots.** `outlook.content` is heavily truncated: subject to 40 chars, body to 1000 chars (center), recipients and attachments show the first 3 items with `[+N]` for overflow. Unlike generic page content, email snapshots fire repeatedly (periodic T5 snapshots) and the structured fields convey enough signal without full-length values.
 - **Selective truncation.** URLs/hrefs are truncated to 40 chars (end). Selected text is truncated to 500 chars (center, preserving start and end). Form values use 500 chars center for long values. Form change values use 50 chars end.
 - **Redaction passthrough.** `input.form_change` and form field rendering respect the `redacted` flag set by the tap layer (for passwords, credit cards, etc.) and output `[redacted]` instead of the value.
 - **Null-safe target text.** Click targets use `text ?? ""` because some elements (e.g. icon buttons, images) have no text content.
