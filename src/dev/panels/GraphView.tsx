@@ -1,5 +1,6 @@
 import {
     Boxes,
+    ClipboardCopy,
     Eclipse,
     Expand,
     GitGraph,
@@ -11,10 +12,22 @@ import {
     Trash2,
     Waypoints,
 } from "lucide-react";
-import type { DirectedGraph, LouvainResult, PreprocessResult, Transition } from "@/aggregation/types";
+import type {
+    DirectedGraph,
+    LouvainResult,
+    PreprocessResult,
+    Transition,
+} from "@/aggregation/types";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { buildDirectedGraph, directedLouvain } from "@/aggregation/directed-louvain";
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+    buildDirectedGraph,
+    directedLouvain,
+} from "@/aggregation/directed-louvain";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -72,7 +85,10 @@ const COMMUNITY_COLORS = [
     "hsl(330, 70%, 60%)",
 ];
 
-function getCommunityColor(communityId: string, communityIds: string[]): string {
+function getCommunityColor(
+    communityId: string,
+    communityIds: string[],
+): string {
     const index = communityIds.indexOf(communityId);
     return COMMUNITY_COLORS[index % COMMUNITY_COLORS.length];
 }
@@ -81,13 +97,20 @@ function convexHull(points: [number, number][]): [number, number][] {
     if (points.length < 3) return points;
     const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
 
-    function cross(o: [number, number], a: [number, number], b: [number, number]): number {
+    function cross(
+        o: [number, number],
+        a: [number, number],
+        b: [number, number],
+    ): number {
         return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
     }
 
     const lower: [number, number][] = [];
     for (const p of sorted) {
-        while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+        while (
+            lower.length >= 2 &&
+            cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0
+        ) {
             lower.pop();
         }
         lower.push(p);
@@ -95,7 +118,10 @@ function convexHull(points: [number, number][]): [number, number][] {
 
     const upper: [number, number][] = [];
     for (const p of [...sorted].reverse()) {
-        while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+        while (
+            upper.length >= 2 &&
+            cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0
+        ) {
             upper.pop();
         }
         upper.push(p);
@@ -112,6 +138,31 @@ function fmtDwell(ms: number): string {
     return `${(ms / 60_000).toFixed(1)}m`;
 }
 
+const MIN_DWELL_MS = 5000;
+
+function collapseShortDwells(transitions: Transition[]): Transition[] {
+    const result: Transition[] = [];
+    for (const t of transitions) {
+        const prev = result.length > 0 ? result[result.length - 1] : null;
+        const connected = prev && prev.to === t.from;
+        if (connected && t.dwellMs < MIN_DWELL_MS) {
+            // Short-lived midpoint — collapse
+            if (prev.from !== t.to) prev.to = t.to;
+        } else if (
+            connected &&
+            t.from === "off_browser" &&
+            t.ts - prev.ts < MIN_DWELL_MS
+        ) {
+            // Brief off_browser hop during tab switch — dwellMs is unreliable
+            // for off_browser (no bundle opened), so use timestamp gap instead
+            if (prev.from !== t.to) prev.to = t.to;
+        } else {
+            result.push({ ...t });
+        }
+    }
+    return result;
+}
+
 function extractHostname(source: string): string {
     const at = source.indexOf("@");
     return at >= 0 ? source.slice(0, at) : source;
@@ -124,7 +175,8 @@ function nodeColor(source: string): string {
         hash = ((hash << 5) - hash + source.charCodeAt(i)) | 0;
     }
     const hue = ((hash % 360) + 360) % 360;
-    if (source === "off_browser" || source === "unknown") return "hsl(0, 0%, 45%)";
+    if (source === "off_browser" || source === "unknown")
+        return "hsl(0, 0%, 45%)";
     return `hsl(${hue}, 65%, 55%)`;
 }
 
@@ -132,9 +184,30 @@ type EdgeTableProps = {
     transitions: Transition[];
     grouped: boolean;
     louvain: LouvainResult | null;
+    sourceUrls: Record<string, string>;
 };
 
-function EdgeTable({ transitions, grouped, louvain }: EdgeTableProps) {
+function SourceCell({ id, urls }: { id: string; urls: Record<string, string> }) {
+    const url = urls[id] ?? "";
+    return (
+        <span className="flex flex-col leading-tight">
+            <span className="truncate" style={{ maxWidth: 200 }} title={id}>
+                {id}
+            </span>
+            {url && (
+                <span
+                    className="truncate text-[10px] text-muted-foreground"
+                    style={{ maxWidth: 200 }}
+                    title={url}
+                >
+                    {url}
+                </span>
+            )}
+        </span>
+    );
+}
+
+function EdgeTable({ transitions, grouped, louvain, sourceUrls }: EdgeTableProps) {
     if (transitions.length === 0) {
         return (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -163,27 +236,45 @@ function EdgeTable({ transitions, grouped, louvain }: EdgeTableProps) {
         const uniqueCommunities = [...new Set(louvain.communities.values())];
 
         // Group edges by community pair
-        type CommunityEdge = Edge & { fromCommunity: string; toCommunity: string };
+        type CommunityEdge = Edge & {
+            fromCommunity: string;
+            toCommunity: string;
+        };
         const communityEdges: CommunityEdge[] = [];
         for (const [, edge] of aggregated) {
             const fromC = louvain.communities.get(edge.from) ?? "?";
             const toC = louvain.communities.get(edge.to) ?? "?";
-            communityEdges.push({ ...edge, fromCommunity: fromC, toCommunity: toC });
+            communityEdges.push({
+                ...edge,
+                fromCommunity: fromC,
+                toCommunity: toC,
+            });
         }
 
         // Group: intra-community first, then inter-community
-        const intra = communityEdges.filter(e => e.fromCommunity === e.toCommunity);
-        const inter = communityEdges.filter(e => e.fromCommunity !== e.toCommunity);
+        const intra = communityEdges.filter(
+            (e) => e.fromCommunity === e.toCommunity,
+        );
+        const inter = communityEdges.filter(
+            (e) => e.fromCommunity !== e.toCommunity,
+        );
 
         // Sort intra by community, then by weight desc
-        intra.sort((a, b) => a.fromCommunity.localeCompare(b.fromCommunity) || b.weight - a.weight);
+        intra.sort(
+            (a, b) =>
+                a.fromCommunity.localeCompare(b.fromCommunity) ||
+                b.weight - a.weight,
+        );
         inter.sort((a, b) => b.weight - a.weight);
 
         // Group intra edges by community
         const byCommunity = new Map<string, CommunityEdge[]>();
         for (const e of intra) {
             let arr = byCommunity.get(e.fromCommunity);
-            if (!arr) { arr = []; byCommunity.set(e.fromCommunity, arr); }
+            if (!arr) {
+                arr = [];
+                byCommunity.set(e.fromCommunity, arr);
+            }
             arr.push(e);
         }
 
@@ -191,15 +282,21 @@ function EdgeTable({ transitions, grouped, louvain }: EdgeTableProps) {
             <div className="dev-scrollbar flex h-full flex-col overflow-y-auto">
                 {/* Nodes summary */}
                 <div className="flex flex-wrap gap-1.5 border-b border-border/50 px-3 py-2">
-                    {[...nodeSet].map(id => {
+                    {[...nodeSet].map((id) => {
                         const community = louvain.communities.get(id);
                         const color = community
                             ? getCommunityColor(community, uniqueCommunities)
                             : "hsl(0,0%,45%)";
                         return (
-                            <span key={id} className="inline-flex items-center gap-1 rounded-full border border-border/50 px-2 py-0.5 text-[11px]">
-                                <span className="inline-block size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
-                                <span className="truncate" style={{ maxWidth: 120 }}>{extractHostname(id)}</span>
+                            <span
+                                key={id}
+                                className="inline-flex items-center gap-1 rounded-full border border-border/50 px-2 py-0.5 text-[11px]"
+                            >
+                                <span
+                                    className="inline-block size-2 shrink-0 rounded-full"
+                                    style={{ backgroundColor: color }}
+                                />
+                                <SourceCell id={id} urls={sourceUrls} />
                             </span>
                         );
                     })}
@@ -207,43 +304,78 @@ function EdgeTable({ transitions, grouped, louvain }: EdgeTableProps) {
 
                 {/* Intra-community edges */}
                 {[...byCommunity.entries()].map(([communityId, cedges]) => {
-                    const color = getCommunityColor(communityId, uniqueCommunities);
-                    const members = [...(louvain.communities.entries())]
+                    const color = getCommunityColor(
+                        communityId,
+                        uniqueCommunities,
+                    );
+                    const members = [...louvain.communities.entries()]
                         .filter(([, c]) => c === communityId)
                         .map(([n]) => n);
                     return (
                         <div key={communityId}>
                             <div className="flex items-center gap-2 border-b border-border/30 bg-muted/30 px-3 py-1.5">
-                                <span className="inline-block size-2.5 rounded-full" style={{ backgroundColor: color }} />
-                                <span className="text-xs font-medium">Community</span>
-                                <span className="text-[10px] text-muted-foreground">{members.length} nodes</span>
+                                <span
+                                    className="inline-block size-2.5 rounded-full"
+                                    style={{ backgroundColor: color }}
+                                />
+                                <span className="text-xs font-medium">
+                                    Community
+                                </span>
+                                <span className="text-[10px] text-muted-foreground">
+                                    {members.length} nodes
+                                </span>
                             </div>
                             <table className="w-full text-xs">
                                 <thead>
                                     <tr className="border-b border-border/30 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-                                        <th className="px-3 py-1 font-medium">From</th>
+                                        <th className="px-3 py-1 font-medium">
+                                            From
+                                        </th>
                                         <th className="px-1 py-1 font-medium" />
-                                        <th className="px-3 py-1 font-medium">To</th>
-                                        <th className="px-3 py-1 text-right font-medium">Weight</th>
+                                        <th className="px-3 py-1 font-medium">
+                                            To
+                                        </th>
+                                        <th className="px-3 py-1 text-right font-medium">
+                                            Weight
+                                        </th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {cedges.map((e, i) => (
-                                        <tr key={i} className="border-b border-border/20 hover:bg-muted/20">
+                                        <tr
+                                            key={i}
+                                            className="border-b border-border/20 hover:bg-muted/20"
+                                        >
                                             <td className="px-3 py-1.5">
                                                 <span className="inline-flex items-center gap-1.5">
-                                                    <span className="inline-block size-1.5 rounded-full" style={{ backgroundColor: color }} />
-                                                    <span className="truncate" style={{ maxWidth: 140 }} title={e.from}>{extractHostname(e.from)}</span>
+                                                    <span
+                                                        className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
+                                                        style={{
+                                                            backgroundColor:
+                                                                color,
+                                                        }}
+                                                    />
+                                                    <SourceCell id={e.from} urls={sourceUrls} />
                                                 </span>
                                             </td>
-                                            <td className="px-1 py-1.5 text-muted-foreground">&rarr;</td>
+                                            <td className="px-1 py-1.5 text-muted-foreground">
+                                                &rarr;
+                                            </td>
                                             <td className="px-3 py-1.5">
                                                 <span className="inline-flex items-center gap-1.5">
-                                                    <span className="inline-block size-1.5 rounded-full" style={{ backgroundColor: color }} />
-                                                    <span className="truncate" style={{ maxWidth: 140 }} title={e.to}>{extractHostname(e.to)}</span>
+                                                    <span
+                                                        className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
+                                                        style={{
+                                                            backgroundColor:
+                                                                color,
+                                                        }}
+                                                    />
+                                                    <SourceCell id={e.to} urls={sourceUrls} />
                                                 </span>
                                             </td>
-                                            <td className="px-3 py-1.5 text-right tabular-nums">{e.weight}</td>
+                                            <td className="px-3 py-1.5 text-right tabular-nums">
+                                                {e.weight}
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -256,38 +388,73 @@ function EdgeTable({ transitions, grouped, louvain }: EdgeTableProps) {
                 {inter.length > 0 && (
                     <div>
                         <div className="flex items-center gap-2 border-b border-border/30 bg-muted/30 px-3 py-1.5">
-                            <span className="text-xs font-medium text-muted-foreground">Cross-community</span>
-                            <span className="text-[10px] text-muted-foreground">{inter.length} edges</span>
+                            <span className="text-xs font-medium text-muted-foreground">
+                                Cross-community
+                            </span>
+                            <span className="text-[10px] text-muted-foreground">
+                                {inter.length} edges
+                            </span>
                         </div>
                         <table className="w-full text-xs">
                             <thead>
                                 <tr className="border-b border-border/30 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
-                                    <th className="px-3 py-1 font-medium">From</th>
+                                    <th className="px-3 py-1 font-medium">
+                                        From
+                                    </th>
                                     <th className="px-1 py-1 font-medium" />
-                                    <th className="px-3 py-1 font-medium">To</th>
-                                    <th className="px-3 py-1 text-right font-medium">Weight</th>
+                                    <th className="px-3 py-1 font-medium">
+                                        To
+                                    </th>
+                                    <th className="px-3 py-1 text-right font-medium">
+                                        Weight
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {inter.map((e, i) => {
-                                    const fromColor = getCommunityColor(e.fromCommunity, uniqueCommunities);
-                                    const toColor = getCommunityColor(e.toCommunity, uniqueCommunities);
+                                    const fromColor = getCommunityColor(
+                                        e.fromCommunity,
+                                        uniqueCommunities,
+                                    );
+                                    const toColor = getCommunityColor(
+                                        e.toCommunity,
+                                        uniqueCommunities,
+                                    );
                                     return (
-                                        <tr key={i} className="border-b border-border/20 hover:bg-muted/20">
+                                        <tr
+                                            key={i}
+                                            className="border-b border-border/20 hover:bg-muted/20"
+                                        >
                                             <td className="px-3 py-1.5">
                                                 <span className="inline-flex items-center gap-1.5">
-                                                    <span className="inline-block size-1.5 rounded-full" style={{ backgroundColor: fromColor }} />
-                                                    <span className="truncate" style={{ maxWidth: 140 }} title={e.from}>{extractHostname(e.from)}</span>
+                                                    <span
+                                                        className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
+                                                        style={{
+                                                            backgroundColor:
+                                                                fromColor,
+                                                        }}
+                                                    />
+                                                    <SourceCell id={e.from} urls={sourceUrls} />
                                                 </span>
                                             </td>
-                                            <td className="px-1 py-1.5 text-muted-foreground">&rarr;</td>
+                                            <td className="px-1 py-1.5 text-muted-foreground">
+                                                &rarr;
+                                            </td>
                                             <td className="px-3 py-1.5">
                                                 <span className="inline-flex items-center gap-1.5">
-                                                    <span className="inline-block size-1.5 rounded-full" style={{ backgroundColor: toColor }} />
-                                                    <span className="truncate" style={{ maxWidth: 140 }} title={e.to}>{extractHostname(e.to)}</span>
+                                                    <span
+                                                        className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
+                                                        style={{
+                                                            backgroundColor:
+                                                                toColor,
+                                                        }}
+                                                    />
+                                                    <SourceCell id={e.to} urls={sourceUrls} />
                                                 </span>
                                             </td>
-                                            <td className="px-3 py-1.5 text-right tabular-nums">{e.weight}</td>
+                                            <td className="px-3 py-1.5 text-right tabular-nums">
+                                                {e.weight}
+                                            </td>
                                         </tr>
                                     );
                                 })}
@@ -304,10 +471,16 @@ function EdgeTable({ transitions, grouped, louvain }: EdgeTableProps) {
         <div className="dev-scrollbar flex h-full flex-col overflow-y-auto">
             {/* Nodes strip */}
             <div className="flex flex-wrap gap-1.5 border-b border-border/50 px-3 py-2">
-                {[...nodeSet].map(id => (
-                    <span key={id} className="inline-flex items-center gap-1 rounded-full border border-border/50 px-2 py-0.5 text-[11px]">
-                        <span className="inline-block size-2 shrink-0 rounded-full" style={{ backgroundColor: nodeColor(id) }} />
-                        <span className="truncate" style={{ maxWidth: 120 }}>{extractHostname(id)}</span>
+                {[...nodeSet].map((id) => (
+                    <span
+                        key={id}
+                        className="inline-flex items-center gap-1 rounded-full border border-border/50 px-2 py-0.5 text-[11px]"
+                    >
+                        <span
+                            className="inline-block size-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: nodeColor(id) }}
+                        />
+                        <SourceCell id={id} urls={sourceUrls} />
                     </span>
                 ))}
             </div>
@@ -319,29 +492,54 @@ function EdgeTable({ transitions, grouped, louvain }: EdgeTableProps) {
                         <th className="px-3 py-1.5 font-medium">From</th>
                         <th className="px-1 py-1.5 font-medium" />
                         <th className="px-3 py-1.5 font-medium">To</th>
-                        <th className="px-3 py-1.5 text-right font-medium">Dwell</th>
-                        <th className="px-3 py-1.5 text-right font-medium">Time</th>
+                        <th className="px-3 py-1.5 text-right font-medium">
+                            Dwell
+                        </th>
+                        <th className="px-3 py-1.5 text-right font-medium">
+                            Time
+                        </th>
                     </tr>
                 </thead>
                 <tbody>
                     {transitions.map((t, i) => (
-                        <tr key={i} className="border-b border-border/20 hover:bg-muted/20">
-                            <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{i + 1}</td>
+                        <tr
+                            key={i}
+                            className="border-b border-border/20 hover:bg-muted/20"
+                        >
+                            <td className="px-3 py-1.5 tabular-nums text-muted-foreground">
+                                {i + 1}
+                            </td>
                             <td className="px-3 py-1.5">
                                 <span className="inline-flex items-center gap-1.5">
-                                    <span className="inline-block size-1.5 rounded-full" style={{ backgroundColor: nodeColor(t.from) }} />
-                                    <span className="truncate" style={{ maxWidth: 140 }} title={t.from}>{extractHostname(t.from)}</span>
+                                    <span
+                                        className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
+                                        style={{
+                                            backgroundColor: nodeColor(t.from),
+                                        }}
+                                    />
+                                    <SourceCell id={t.from} urls={sourceUrls} />
                                 </span>
                             </td>
-                            <td className="px-1 py-1.5 text-muted-foreground">&rarr;</td>
+                            <td className="px-1 py-1.5 text-muted-foreground">
+                                &rarr;
+                            </td>
                             <td className="px-3 py-1.5">
                                 <span className="inline-flex items-center gap-1.5">
-                                    <span className="inline-block size-1.5 rounded-full" style={{ backgroundColor: nodeColor(t.to) }} />
-                                    <span className="truncate" style={{ maxWidth: 140 }} title={t.to}>{extractHostname(t.to)}</span>
+                                    <span
+                                        className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
+                                        style={{
+                                            backgroundColor: nodeColor(t.to),
+                                        }}
+                                    />
+                                    <SourceCell id={t.to} urls={sourceUrls} />
                                 </span>
                             </td>
-                            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{fmtDwell(t.dwellMs)}</td>
-                            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{fmtTime(t.ts)}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                                {fmtDwell(t.dwellMs)}
+                            </td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                                {fmtTime(t.ts)}
+                            </td>
                         </tr>
                     ))}
                 </tbody>
@@ -413,12 +611,17 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                     sourceUrls?: Record<string, string>;
                 };
                 return {
-                    transitions: snapshot.transitions ?? [],
+                    transitions: collapseShortDwells(
+                        snapshot.transitions ?? [],
+                    ),
                     sourceUrls: snapshot.sourceUrls ?? {},
                 };
             }
         }
-        return { transitions: [] as Transition[], sourceUrls: {} as Record<string, string> };
+        return {
+            transitions: [] as Transition[],
+            sourceUrls: {} as Record<string, string>,
+        };
     }, [entries]);
 
     const latestTransitions = latestSnapshot.transitions;
@@ -452,10 +655,15 @@ export function GraphView({ entries, onClear, onSend }: Props) {
         groupedResultRef.current = result;
         return result;
     }, [
-        activeTab, latestTransitions,
-        resolution, hubThreshold, hubMinSources,
-        sentinelPassthroughMs, sentinelBreakMs,
-        transientDwellMs, targetPerChunk,
+        activeTab,
+        latestTransitions,
+        resolution,
+        hubThreshold,
+        hubMinSources,
+        sentinelPassthroughMs,
+        sentinelBreakMs,
+        transientDwellMs,
+        targetPerChunk,
     ]);
 
     const activeTabRef = useRef(activeTab);
@@ -478,7 +686,12 @@ export function GraphView({ entries, onClear, onSend }: Props) {
 
         // Find the latest state.snapshot entry since last processed
         type SnapshotData = {
-            transitions: { from: string; to: string; ts: number; dwellMs: number }[];
+            transitions: {
+                from: string;
+                to: string;
+                ts: number;
+                dwellMs: number;
+            }[];
             sourceUrls?: Record<string, string>;
         };
         let latestSnapshot: SnapshotData | null = null;
@@ -492,7 +705,9 @@ export function GraphView({ entries, onClear, onSend }: Props) {
         processedRef.current = entries.length;
         if (!latestSnapshot) return;
 
-        const transitions = latestSnapshot.transitions ?? [];
+        const transitions = collapseShortDwells(
+            latestSnapshot.transitions ?? [],
+        );
 
         // Aggregate transitions into edges and collect node IDs
         const newEdges = new Map<string, Edge>();
@@ -584,8 +799,10 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                     id: nodeId,
                     x: old?.x ?? (Math.random() - 0.5) * 200,
                     y: old?.y ?? (Math.random() - 0.5) * 200,
-                    vx: 0, vy: 0,
-                    firstSeen: 0, lastSeen: 0,
+                    vx: 0,
+                    vy: 0,
+                    firstSeen: 0,
+                    lastSeen: 0,
                 });
             }
 
@@ -718,7 +935,9 @@ export function GraphView({ entries, onClear, onSend }: Props) {
         // --- community hulls (grouped mode) ---
         const gr = groupedResultRef.current;
         if (activeTabRef.current === "grouped" && gr) {
-            const uniqueCommunities = [...new Set(gr.louvain.communities.values())];
+            const uniqueCommunities = [
+                ...new Set(gr.louvain.communities.values()),
+            ];
 
             for (const communityId of uniqueCommunities) {
                 const communityNodes: Node[] = [];
@@ -731,7 +950,7 @@ export function GraphView({ entries, onClear, onSend }: Props) {
 
                 if (communityNodes.length < 2) continue;
 
-                const hull = convexHull(communityNodes.map(n => [n.x, n.y]));
+                const hull = convexHull(communityNodes.map((n) => [n.x, n.y]));
                 if (hull.length < 3) continue;
 
                 const color = getCommunityColor(communityId, uniqueCommunities);
@@ -743,7 +962,10 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                     const dx = x - cx;
                     const dy = y - cy;
                     const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-                    return [x + (dx / dist) * padding, y + (dy / dist) * padding] as [number, number];
+                    return [
+                        x + (dx / dist) * padding,
+                        y + (dy / dist) * padding,
+                    ] as [number, number];
                 });
 
                 ctx.beginPath();
@@ -752,9 +974,13 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                     ctx.lineTo(expanded[i][0], expanded[i][1]);
                 }
                 ctx.closePath();
-                ctx.fillStyle = color.replace(")", ", 0.08)").replace("hsl(", "hsla(");
+                ctx.fillStyle = color
+                    .replace(")", ", 0.08)")
+                    .replace("hsl(", "hsla(");
                 ctx.fill();
-                ctx.strokeStyle = color.replace(")", ", 0.3)").replace("hsl(", "hsla(");
+                ctx.strokeStyle = color
+                    .replace(")", ", 0.3)")
+                    .replace("hsl(", "hsla(");
                 ctx.lineWidth = 1;
                 ctx.stroke();
             }
@@ -850,7 +1076,10 @@ export function GraphView({ entries, onClear, onSend }: Props) {
         // --- compute per-node degree for sizing ---
         const degreeMap = new Map<string, number>();
         for (const edge of edges) {
-            degreeMap.set(edge.from, (degreeMap.get(edge.from) ?? 0) + edge.weight);
+            degreeMap.set(
+                edge.from,
+                (degreeMap.get(edge.from) ?? 0) + edge.weight,
+            );
             degreeMap.set(edge.to, (degreeMap.get(edge.to) ?? 0) + edge.weight);
         }
 
@@ -879,7 +1108,9 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                 ctx.fillStyle = "rgba(120,120,120,0.15)";
             } else if (activeTabRef.current === "grouped" && gr) {
                 const communityId = gr.louvain.communities.get(node.id);
-                const uniqueCommunities = [...new Set(gr.louvain.communities.values())];
+                const uniqueCommunities = [
+                    ...new Set(gr.louvain.communities.values()),
+                ];
                 ctx.fillStyle = communityId
                     ? getCommunityColor(communityId, uniqueCommunities)
                     : "rgba(120,120,120,0.4)";
@@ -928,18 +1159,24 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                     // URL hostname — tertiary
                     if (node.url) {
                         try {
-                            const host = new URL(node.url).hostname.replace(/^www\./, "");
+                            const host = new URL(node.url).hostname.replace(
+                                /^www\./,
+                                "",
+                            );
                             ctx.font = "9px sans-serif";
                             ctx.fillStyle = "rgba(140,170,220,0.7)";
                             ctx.fillText(host, node.x, node.y + r + 29);
-                        } catch { /* invalid url */ }
+                        } catch {
+                            /* invalid url */
+                        }
                     }
                 } else {
                     // No @ — show as-is (e.g. off_browser, unknown)
                     ctx.font = "bold 11px sans-serif";
-                    ctx.fillStyle = isOffBrowser || isUnknown
-                        ? "rgba(160,160,160,0.7)"
-                        : "rgba(230,230,230,0.95)";
+                    ctx.fillStyle =
+                        isOffBrowser || isUnknown
+                            ? "rgba(160,160,160,0.7)"
+                            : "rgba(230,230,230,0.95)";
                     ctx.fillText(node.id, node.x, node.y + r + 4);
                 }
             }
@@ -1002,8 +1239,15 @@ export function GraphView({ entries, onClear, onSend }: Props) {
         });
 
         ro.observe(wrap);
+        // Also set initial size immediately for the current canvas
+        const dpr0 = window.devicePixelRatio || 1;
+        const rect0 = wrap.getBoundingClientRect();
+        canvas.width = rect0.width * dpr0;
+        canvas.height = rect0.height * dpr0;
+        canvas.style.width = `${rect0.width}px`;
+        canvas.style.height = `${rect0.height}px`;
         return () => ro.disconnect();
-    }, []);
+    }, [viewMode]);
 
     // --- hit test ---
     const hitTest = useCallback(
@@ -1139,7 +1383,7 @@ export function GraphView({ entries, onClear, onSend }: Props) {
             window.removeEventListener("mouseup", onMouseUp);
             canvas.removeEventListener("wheel", onWheel);
         };
-    }, [hitTest]);
+    }, [hitTest, viewMode]);
 
     // --- fullscreen tracking ---
     useEffect(() => {
@@ -1198,6 +1442,60 @@ export function GraphView({ entries, onClear, onSend }: Props) {
         panRef.current.y = -cy * zoom;
     }, []);
 
+    const copyGraphText = useCallback(() => {
+        const transitions =
+            activeTab === "grouped" && groupedResult
+                ? groupedResult.pr.transitions
+                : latestTransitions;
+        if (transitions.length === 0) return;
+
+        const edges = new Map<string, number>();
+        const nodeSet = new Set<string>();
+        for (const t of transitions) {
+            nodeSet.add(t.from);
+            nodeSet.add(t.to);
+            const key = `${t.from} -> ${t.to}`;
+            edges.set(key, (edges.get(key) ?? 0) + 1);
+        }
+
+        const lines: string[] = ["# Navigation Graph", ""];
+
+        // Nodes with URLs
+        lines.push(`## Nodes (${nodeSet.size})`);
+        for (const id of nodeSet) {
+            const url = latestSnapshot.sourceUrls[id];
+            lines.push(url ? `- ${id} (${url})` : `- ${id}`);
+        }
+
+        // Communities if grouped
+        const louvain = groupedResult?.louvain;
+        if (activeTab === "grouped" && louvain) {
+            lines.push("", "## Communities");
+            const byCommunity = new Map<string, string[]>();
+            for (const [nodeId, cId] of louvain.communities) {
+                let arr = byCommunity.get(cId);
+                if (!arr) {
+                    arr = [];
+                    byCommunity.set(cId, arr);
+                }
+                arr.push(nodeId);
+            }
+            let i = 0;
+            for (const [, members] of byCommunity) {
+                lines.push(`- Community ${i++}: ${members.join(", ")}`);
+            }
+        }
+
+        // Edges sorted by weight desc
+        lines.push("", `## Edges (${edges.size})`);
+        const sorted = [...edges.entries()].sort((a, b) => b[1] - a[1]);
+        for (const [edge, weight] of sorted) {
+            lines.push(`- ${edge} (weight: ${weight})`);
+        }
+
+        navigator.clipboard.writeText(lines.join("\n"));
+    }, [activeTab, groupedResult, latestTransitions, latestSnapshot.sourceUrls]);
+
     // --- tooltip stats ---
     function getStats(nodeId: string) {
         const inbound: { from: string; weight: number }[] = [];
@@ -1237,7 +1535,9 @@ export function GraphView({ entries, onClear, onSend }: Props) {
             const tabId = at >= 0 ? node.id.slice(at + 1) : null;
             const gr2 = groupedResultRef.current;
             const communityId = gr2?.louvain.communities.get(node.id) ?? null;
-            const uniqueCommunities = gr2 ? [...new Set(gr2.louvain.communities.values())] : [];
+            const uniqueCommunities = gr2
+                ? [...new Set(gr2.louvain.communities.values())]
+                : [];
 
             tooltipContent = (
                 <div
@@ -1249,12 +1549,18 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                         <span
                             className="inline-block size-2.5 shrink-0 rounded-full"
                             style={{
-                                backgroundColor: activeTab === "grouped" && communityId
-                                    ? getCommunityColor(communityId, uniqueCommunities)
-                                    : nodeColor(node.id),
+                                backgroundColor:
+                                    activeTab === "grouped" && communityId
+                                        ? getCommunityColor(
+                                              communityId,
+                                              uniqueCommunities,
+                                          )
+                                        : nodeColor(node.id),
                             }}
                         />
-                        <span className="truncate text-sm font-semibold">{contextName}</span>
+                        <span className="truncate text-sm font-semibold">
+                            {contextName}
+                        </span>
                     </div>
                     {tabId && (
                         <div className="mt-0.5 text-[10px] text-muted-foreground">
@@ -1262,7 +1568,10 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                         </div>
                     )}
                     {node.url && (
-                        <div className="mt-0.5 truncate text-[10px] text-blue-400/80" title={node.url}>
+                        <div
+                            className="mt-0.5 truncate text-[10px] text-blue-400/80"
+                            title={node.url}
+                        >
                             {node.url}
                         </div>
                     )}
@@ -1272,12 +1581,22 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                         <div className="mt-1.5 flex items-center gap-1.5">
                             <span
                                 className="inline-block size-2 rounded-full"
-                                style={{ backgroundColor: getCommunityColor(communityId, uniqueCommunities) }}
+                                style={{
+                                    backgroundColor: getCommunityColor(
+                                        communityId,
+                                        uniqueCommunities,
+                                    ),
+                                }}
                             />
                             <span className="text-[10px] text-muted-foreground">
-                                Community &middot; {
-                                    [...(gr2?.louvain.communities.values() ?? [])].filter(c => c === communityId).length
-                                } members
+                                Community &middot;{" "}
+                                {
+                                    [
+                                        ...(gr2?.louvain.communities.values() ??
+                                            []),
+                                    ].filter((c) => c === communityId).length
+                                }{" "}
+                                members
                             </span>
                         </div>
                     )}
@@ -1376,22 +1695,32 @@ export function GraphView({ entries, onClear, onSend }: Props) {
             >
                 {viewMode === "graph" ? (
                     <>
-                        <canvas ref={canvasRef} className="block h-full w-full" />
+                        <canvas
+                            ref={canvasRef}
+                            className="block h-full w-full"
+                        />
                         {tooltipContent}
                     </>
                 ) : (
                     <div className="h-full pt-10">
                         <EdgeTable
-                            transitions={activeTab === "grouped" && groupedResult ? groupedResult.pr.transitions : latestTransitions}
+                            transitions={
+                                activeTab === "grouped" && groupedResult
+                                    ? groupedResult.pr.transitions
+                                    : latestTransitions
+                            }
                             grouped={activeTab === "grouped"}
                             louvain={groupedResult?.louvain ?? null}
+                            sourceUrls={latestSnapshot.sourceUrls}
                         />
                     </div>
                 )}
                 <div className="absolute left-2 top-2 z-10 flex gap-1.5">
                     <Tabs
                         value={activeTab}
-                        onValueChange={(v) => setActiveTab(v as "raw" | "grouped")}
+                        onValueChange={(v) =>
+                            setActiveTab(v as "raw" | "grouped")
+                        }
                     >
                         <TabsList className="h-auto border border-border bg-popover/80 p-0.5 backdrop-blur-sm">
                             <TabsTrigger
@@ -1412,7 +1741,9 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                     </Tabs>
                     <Tabs
                         value={viewMode}
-                        onValueChange={(v) => setViewMode(v as "graph" | "edges")}
+                        onValueChange={(v) =>
+                            setViewMode(v as "graph" | "edges")
+                        }
                     >
                         <TabsList className="h-auto border border-border bg-popover/80 p-0.5 backdrop-blur-sm">
                             <TabsTrigger
@@ -1436,14 +1767,34 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                     {onClear && (
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <Button variant="outline" size="icon-xs" onClick={() => {
-                                    onSend?.({ type: "state.reset" });
-                                    onClear();
-                                }}>
+                                <Button
+                                    variant="outline"
+                                    size="icon-xs"
+                                    onClick={() => {
+                                        onSend?.({ type: "state.reset" });
+                                        onClear();
+                                    }}
+                                >
                                     <Trash2 />
                                 </Button>
                             </TooltipTrigger>
                             <TooltipContent>Reset all state</TooltipContent>
+                        </Tooltip>
+                    )}
+                    {viewMode === "edges" && (
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    size="icon-xs"
+                                    onClick={copyGraphText}
+                                >
+                                    <ClipboardCopy />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                Copy graph (LLM-readable)
+                            </TooltipContent>
                         </Tooltip>
                     )}
                     {viewMode === "graph" && (
@@ -1451,19 +1802,29 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <Button
-                                        variant={physicsOpen ? "default" : "outline"}
+                                        variant={
+                                            physicsOpen ? "default" : "outline"
+                                        }
                                         size="icon-xs"
-                                        onClick={() => setPhysicsOpen((o) => !o)}
+                                        onClick={() =>
+                                            setPhysicsOpen((o) => !o)
+                                        }
                                     >
                                         <Settings2 />
                                     </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>{physicsOpen ? "Close physics" : "Physics settings"}</TooltipContent>
+                                <TooltipContent>
+                                    {physicsOpen
+                                        ? "Close physics"
+                                        : "Physics settings"}
+                                </TooltipContent>
                             </Tooltip>
                             <Tooltip>
                                 <TooltipTrigger asChild>
                                     <Button
-                                        variant={dimMode ? "default" : "outline"}
+                                        variant={
+                                            dimMode ? "default" : "outline"
+                                        }
                                         size="icon-xs"
                                         onClick={() => {
                                             setDimMode((d) => {
@@ -1475,11 +1836,19 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                                         <Eclipse />
                                     </Button>
                                 </TooltipTrigger>
-                                <TooltipContent>{dimMode ? "Disable dim mode" : "Enable dim mode"}</TooltipContent>
+                                <TooltipContent>
+                                    {dimMode
+                                        ? "Disable dim mode"
+                                        : "Enable dim mode"}
+                                </TooltipContent>
                             </Tooltip>
                             <Tooltip>
                                 <TooltipTrigger asChild>
-                                    <Button variant="outline" size="icon-xs" onClick={fitToView}>
+                                    <Button
+                                        variant="outline"
+                                        size="icon-xs"
+                                        onClick={fitToView}
+                                    >
                                         <Scan />
                                     </Button>
                                 </TooltipTrigger>
@@ -1489,19 +1858,31 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                     )}
                     <Tooltip>
                         <TooltipTrigger asChild>
-                            <Button variant="outline" size="icon-xs" onClick={toggleFullscreen}>
+                            <Button
+                                variant="outline"
+                                size="icon-xs"
+                                onClick={toggleFullscreen}
+                            >
                                 {isFullscreen ? <Shrink /> : <Expand />}
                             </Button>
                         </TooltipTrigger>
-                        <TooltipContent>{isFullscreen ? "Exit fullscreen" : "Fullscreen"}</TooltipContent>
+                        <TooltipContent>
+                            {isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+                        </TooltipContent>
                     </Tooltip>
                     <Tooltip>
                         <TooltipTrigger asChild>
-                            <Button variant="outline" size="icon-xs" onClick={() => setPanelOpen((o) => !o)}>
+                            <Button
+                                variant="outline"
+                                size="icon-xs"
+                                onClick={() => setPanelOpen((o) => !o)}
+                            >
                                 <PanelRight />
                             </Button>
                         </TooltipTrigger>
-                        <TooltipContent>{panelOpen ? "Close panel" : "Open panel"}</TooltipContent>
+                        <TooltipContent>
+                            {panelOpen ? "Close panel" : "Open panel"}
+                        </TooltipContent>
                     </Tooltip>
                 </div>
                 {physicsOpen && viewMode === "graph" && (
@@ -1594,7 +1975,10 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                 )}
             </div>
             {panelOpen && (
-                <div className="relative flex h-full shrink-0 flex-col border-l border-border bg-background" style={{ width: panelWidth }}>
+                <div
+                    className="relative flex h-full shrink-0 flex-col border-l border-border bg-background"
+                    style={{ width: panelWidth }}
+                >
                     {/* Resize handle */}
                     <div
                         className="absolute -left-1 top-0 z-20 h-full w-2 cursor-col-resize hover:bg-accent/50 active:bg-accent"
@@ -1604,10 +1988,18 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                             const startWidth = panelWidth;
                             const onMove = (ev: MouseEvent) => {
                                 const delta = startX - ev.clientX;
-                                setPanelWidth(Math.max(200, Math.min(600, startWidth + delta)));
+                                setPanelWidth(
+                                    Math.max(
+                                        200,
+                                        Math.min(600, startWidth + delta),
+                                    ),
+                                );
                             };
                             const onUp = () => {
-                                document.removeEventListener("mousemove", onMove);
+                                document.removeEventListener(
+                                    "mousemove",
+                                    onMove,
+                                );
                                 document.removeEventListener("mouseup", onUp);
                             };
                             document.addEventListener("mousemove", onMove);
@@ -1616,7 +2008,9 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                     />
                     <div className="border-b border-border px-3 py-2">
                         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                            {activeTab === "grouped" ? "Algorithm Parameters" : "Graph Info"}
+                            {activeTab === "grouped"
+                                ? "Algorithm Parameters"
+                                : "Graph Info"}
                         </h3>
                     </div>
                     <div className="dev-scrollbar flex-1 overflow-y-auto p-3 space-y-4 text-xs">
@@ -1629,33 +2023,59 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                                             Results
                                         </div>
                                         <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                                            <span className="text-muted-foreground">Modularity</span>
-                                            <span className="text-right tabular-nums">
-                                                {groupedResult.louvain.modularity.toFixed(4)}
+                                            <span className="text-muted-foreground">
+                                                Modularity
                                             </span>
-                                            <span className="text-muted-foreground">Communities</span>
                                             <span className="text-right tabular-nums">
-                                                {new Set(groupedResult.louvain.communities.values()).size}
+                                                {groupedResult.louvain.modularity.toFixed(
+                                                    4,
+                                                )}
                                             </span>
-                                            <span className="text-muted-foreground">Nodes</span>
+                                            <span className="text-muted-foreground">
+                                                Communities
+                                            </span>
+                                            <span className="text-right tabular-nums">
+                                                {
+                                                    new Set(
+                                                        groupedResult.louvain.communities.values(),
+                                                    ).size
+                                                }
+                                            </span>
+                                            <span className="text-muted-foreground">
+                                                Nodes
+                                            </span>
                                             <span className="text-right tabular-nums">
                                                 {groupedResult.graph.nodes.size}
                                             </span>
-                                            <span className="text-muted-foreground">Edges</span>
+                                            <span className="text-muted-foreground">
+                                                Edges
+                                            </span>
                                             <span className="text-right tabular-nums">
                                                 {groupedResult.graph.edges.size}
                                             </span>
-                                            <span className="text-muted-foreground">Hubs</span>
-                                            <span className="text-right tabular-nums">
-                                                {groupedResult.pr.hubSources.size}
+                                            <span className="text-muted-foreground">
+                                                Hubs
                                             </span>
-                                            <span className="text-muted-foreground">Sentinels</span>
+                                            <span className="text-right tabular-nums">
+                                                {
+                                                    groupedResult.pr.hubSources
+                                                        .size
+                                                }
+                                            </span>
+                                            <span className="text-muted-foreground">
+                                                Sentinels
+                                            </span>
                                             <span className="text-right tabular-nums">
                                                 {groupedResult.pr.sentinelCount}
                                             </span>
-                                            <span className="text-muted-foreground">Excluded</span>
+                                            <span className="text-muted-foreground">
+                                                Excluded
+                                            </span>
                                             <span className="text-right tabular-nums">
-                                                {groupedResult.pr.excludedSources.size}
+                                                {
+                                                    groupedResult.pr
+                                                        .excludedSources.size
+                                                }
                                             </span>
                                         </div>
                                     </div>
@@ -1670,19 +2090,30 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                                     <div>
                                         <div className="flex justify-between text-muted-foreground">
                                             <span>Resolution ({"\u03B3"})</span>
-                                            <span className="tabular-nums">{resolution.toFixed(2)}</span>
+                                            <span className="tabular-nums">
+                                                {resolution.toFixed(2)}
+                                            </span>
                                         </div>
                                         <Slider
-                                            min={0.1} max={3.0} step={0.05}
+                                            min={0.1}
+                                            max={3.0}
+                                            step={0.05}
                                             value={[resolution]}
-                                            onValueChange={([v]) => setResolution(v)}
+                                            onValueChange={([v]) =>
+                                                setResolution(v)
+                                            }
                                             className="mt-1"
                                         />
                                         <div className="flex justify-between text-muted-foreground text-[10px]">
                                             <span>0.1 (larger)</span>
                                             <span>3.0 (smaller)</span>
                                         </div>
-                                        <p className="mt-1 text-xs text-muted-foreground/60">Controls community granularity. Lower values merge more sources into fewer, larger groups. Higher values split into many smaller groups.</p>
+                                        <p className="mt-1 text-xs text-muted-foreground/60">
+                                            Controls community granularity.
+                                            Lower values merge more sources into
+                                            fewer, larger groups. Higher values
+                                            split into many smaller groups.
+                                        </p>
                                     </div>
                                 </div>
                                 <Separator />
@@ -1695,28 +2126,57 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                                     <div>
                                         <div className="flex justify-between text-muted-foreground">
                                             <span>Pass-through</span>
-                                            <span className="tabular-nums">{(sentinelPassthroughMs / 1000).toFixed(1)}s</span>
+                                            <span className="tabular-nums">
+                                                {(
+                                                    sentinelPassthroughMs / 1000
+                                                ).toFixed(1)}
+                                                s
+                                            </span>
                                         </div>
                                         <Slider
-                                            min={500} max={10000} step={500}
+                                            min={500}
+                                            max={10000}
+                                            step={500}
                                             value={[sentinelPassthroughMs]}
-                                            onValueChange={([v]) => setSentinelPassthroughMs(v)}
+                                            onValueChange={([v]) =>
+                                                setSentinelPassthroughMs(v)
+                                            }
                                             className="mt-1"
                                         />
-                                        <p className="mt-1 text-xs text-muted-foreground/60">Off-browser stints shorter than this are collapsed into a direct A{"\u2192"}B edge. Filters notification popups and accidental focus loss.</p>
+                                        <p className="mt-1 text-xs text-muted-foreground/60">
+                                            Off-browser stints shorter than this
+                                            are collapsed into a direct A
+                                            {"\u2192"}B edge. Filters
+                                            notification popups and accidental
+                                            focus loss.
+                                        </p>
                                     </div>
                                     <div>
                                         <div className="flex justify-between text-muted-foreground">
                                             <span>Break boundary</span>
-                                            <span className="tabular-nums">{(sentinelBreakMs / 60000).toFixed(0)} min</span>
+                                            <span className="tabular-nums">
+                                                {(
+                                                    sentinelBreakMs / 60000
+                                                ).toFixed(0)}{" "}
+                                                min
+                                            </span>
                                         </div>
                                         <Slider
-                                            min={60000} max={1800000} step={60000}
+                                            min={60000}
+                                            max={1800000}
+                                            step={60000}
                                             value={[sentinelBreakMs]}
-                                            onValueChange={([v]) => setSentinelBreakMs(v)}
+                                            onValueChange={([v]) =>
+                                                setSentinelBreakMs(v)
+                                            }
                                             className="mt-1"
                                         />
-                                        <p className="mt-1 text-xs text-muted-foreground/60">Off-browser stints longer than this sever the graph link entirely. Treats long absences (lunch, meetings) as task boundaries.</p>
+                                        <p className="mt-1 text-xs text-muted-foreground/60">
+                                            Off-browser stints longer than this
+                                            sever the graph link entirely.
+                                            Treats long absences (lunch,
+                                            meetings) as task boundaries.
+                                        </p>
                                     </div>
                                 </div>
                                 <Separator />
@@ -1729,15 +2189,26 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                                     <div>
                                         <div className="flex justify-between text-muted-foreground">
                                             <span>Dwell threshold</span>
-                                            <span className="tabular-nums">{transientDwellMs}ms</span>
+                                            <span className="tabular-nums">
+                                                {transientDwellMs}ms
+                                            </span>
                                         </div>
                                         <Slider
-                                            min={100} max={2000} step={100}
+                                            min={100}
+                                            max={2000}
+                                            step={100}
                                             value={[transientDwellMs]}
-                                            onValueChange={([v]) => setTransientDwellMs(v)}
+                                            onValueChange={([v]) =>
+                                                setTransientDwellMs(v)
+                                            }
                                             className="mt-1"
                                         />
-                                        <p className="mt-1 text-xs text-muted-foreground/60">Sources where every visit was shorter than this are removed as transient. Filters rapid tab scanning (Ctrl+Tab).</p>
+                                        <p className="mt-1 text-xs text-muted-foreground/60">
+                                            Sources where every visit was
+                                            shorter than this are removed as
+                                            transient. Filters rapid tab
+                                            scanning (Ctrl+Tab).
+                                        </p>
                                     </div>
                                 </div>
                                 <Separator />
@@ -1750,41 +2221,78 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                                     <div>
                                         <div className="flex justify-between text-muted-foreground">
                                             <span>Threshold</span>
-                                            <span className="tabular-nums">{(hubThreshold * 100).toFixed(0)}%</span>
+                                            <span className="tabular-nums">
+                                                {(hubThreshold * 100).toFixed(
+                                                    0,
+                                                )}
+                                                %
+                                            </span>
                                         </div>
                                         <Slider
-                                            min={0.05} max={0.5} step={0.01}
+                                            min={0.05}
+                                            max={0.5}
+                                            step={0.01}
                                             value={[hubThreshold]}
-                                            onValueChange={([v]) => setHubThreshold(v)}
+                                            onValueChange={([v]) =>
+                                                setHubThreshold(v)
+                                            }
                                             className="mt-1"
                                         />
-                                        <p className="mt-1 text-xs text-muted-foreground/60">A source is a hub if its neighbor count exceeds this % of total sources. Hubs (e.g. email, Slack) are split into time chunks instead of dominating one community.</p>
+                                        <p className="mt-1 text-xs text-muted-foreground/60">
+                                            A source is a hub if its neighbor
+                                            count exceeds this % of total
+                                            sources. Hubs (e.g. email, Slack)
+                                            are split into time chunks instead
+                                            of dominating one community.
+                                        </p>
                                     </div>
                                     <div>
                                         <div className="flex justify-between text-muted-foreground">
                                             <span>Min sources</span>
-                                            <span className="tabular-nums">{hubMinSources}</span>
+                                            <span className="tabular-nums">
+                                                {hubMinSources}
+                                            </span>
                                         </div>
                                         <Slider
-                                            min={3} max={30} step={1}
+                                            min={3}
+                                            max={30}
+                                            step={1}
                                             value={[hubMinSources]}
-                                            onValueChange={([v]) => setHubMinSources(v)}
+                                            onValueChange={([v]) =>
+                                                setHubMinSources(v)
+                                            }
                                             className="mt-1"
                                         />
-                                        <p className="mt-1 text-xs text-muted-foreground/60">Hub detection only activates when total unique sources reaches this count. Prevents false hub detection in small graphs.</p>
+                                        <p className="mt-1 text-xs text-muted-foreground/60">
+                                            Hub detection only activates when
+                                            total unique sources reaches this
+                                            count. Prevents false hub detection
+                                            in small graphs.
+                                        </p>
                                     </div>
                                     <div>
                                         <div className="flex justify-between text-muted-foreground">
                                             <span>Target per chunk</span>
-                                            <span className="tabular-nums">{targetPerChunk}</span>
+                                            <span className="tabular-nums">
+                                                {targetPerChunk}
+                                            </span>
                                         </div>
                                         <Slider
-                                            min={2} max={10} step={1}
+                                            min={2}
+                                            max={10}
+                                            step={1}
                                             value={[targetPerChunk]}
-                                            onValueChange={([v]) => setTargetPerChunk(v)}
+                                            onValueChange={([v]) =>
+                                                setTargetPerChunk(v)
+                                            }
                                             className="mt-1"
                                         />
-                                        <p className="mt-1 text-xs text-muted-foreground/60">Target transitions per hub chunk. Drives the dynamic window size — fewer means finer-grained time slicing of hub sources.</p>
+                                        <p className="mt-1 text-xs text-muted-foreground/60">
+                                            Target transitions per hub chunk.
+                                            Drives the dynamic window size —
+                                            fewer means finer-grained time
+                                            slicing of hub sources.
+                                        </p>
                                     </div>
                                 </div>
                                 <Separator />
@@ -1796,29 +2304,63 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                                             Communities
                                         </div>
                                         {(() => {
-                                            const communities = new Map<string, string[]>();
-                                            for (const [nodeId, communityId] of groupedResult.louvain.communities) {
-                                                let members = communities.get(communityId);
+                                            const communities = new Map<
+                                                string,
+                                                string[]
+                                            >();
+                                            for (const [
+                                                nodeId,
+                                                communityId,
+                                            ] of groupedResult.louvain
+                                                .communities) {
+                                                let members =
+                                                    communities.get(
+                                                        communityId,
+                                                    );
                                                 if (!members) {
                                                     members = [];
-                                                    communities.set(communityId, members);
+                                                    communities.set(
+                                                        communityId,
+                                                        members,
+                                                    );
                                                 }
                                                 members.push(nodeId);
                                             }
-                                            const uniqueCommunities = [...communities.keys()];
+                                            const uniqueCommunities = [
+                                                ...communities.keys(),
+                                            ];
 
-                                            return [...communities.entries()].map(([communityId, members]) => (
-                                                <div key={communityId} className="rounded border border-border/50 p-2">
+                                            return [
+                                                ...communities.entries(),
+                                            ].map(([communityId, members]) => (
+                                                <div
+                                                    key={communityId}
+                                                    className="rounded border border-border/50 p-2"
+                                                >
                                                     <div className="flex items-center gap-2">
                                                         <div
                                                             className="h-2.5 w-2.5 rounded-full"
-                                                            style={{ backgroundColor: getCommunityColor(communityId, uniqueCommunities) }}
+                                                            style={{
+                                                                backgroundColor:
+                                                                    getCommunityColor(
+                                                                        communityId,
+                                                                        uniqueCommunities,
+                                                                    ),
+                                                            }}
                                                         />
-                                                        <span className="font-medium">{members.length} nodes</span>
+                                                        <span className="font-medium">
+                                                            {members.length}{" "}
+                                                            nodes
+                                                        </span>
                                                     </div>
                                                     <div className="mt-1 space-y-px">
-                                                        {members.map(id => (
-                                                            <div key={id} className="truncate text-muted-foreground">{id}</div>
+                                                        {members.map((id) => (
+                                                            <div
+                                                                key={id}
+                                                                className="truncate text-muted-foreground"
+                                                            >
+                                                                {id}
+                                                            </div>
                                                         ))}
                                                     </div>
                                                 </div>
@@ -1832,16 +2374,28 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                             <div className="space-y-4">
                                 <div className="grid grid-cols-3 gap-2">
                                     <div className="rounded border border-border/50 p-2 text-center">
-                                        <div className="text-lg tabular-nums">{latestTransitions.length}</div>
-                                        <div className="text-[10px] text-muted-foreground">Transitions</div>
+                                        <div className="text-lg tabular-nums">
+                                            {latestTransitions.length}
+                                        </div>
+                                        <div className="text-[10px] text-muted-foreground">
+                                            Transitions
+                                        </div>
                                     </div>
                                     <div className="rounded border border-border/50 p-2 text-center">
-                                        <div className="text-lg tabular-nums">{nodesRef.current.size}</div>
-                                        <div className="text-[10px] text-muted-foreground">Nodes</div>
+                                        <div className="text-lg tabular-nums">
+                                            {nodesRef.current.size}
+                                        </div>
+                                        <div className="text-[10px] text-muted-foreground">
+                                            Nodes
+                                        </div>
                                     </div>
                                     <div className="rounded border border-border/50 p-2 text-center">
-                                        <div className="text-lg tabular-nums">{edgesRef.current.size}</div>
-                                        <div className="text-[10px] text-muted-foreground">Edges</div>
+                                        <div className="text-lg tabular-nums">
+                                            {edgesRef.current.size}
+                                        </div>
+                                        <div className="text-[10px] text-muted-foreground">
+                                            Edges
+                                        </div>
                                     </div>
                                 </div>
                                 <Separator />
@@ -1849,32 +2403,59 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                                     <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                                         Sources
                                     </div>
-                                    {[...nodesRef.current.values()].map(node => {
-                                        const at = node.id.indexOf("@");
-                                        const context = at >= 0 ? node.id.slice(0, at) : node.id;
-                                        const tabIdPart = at >= 0 ? node.id.slice(at + 1) : null;
-                                        return (
-                                            <div key={node.id} className="flex items-start gap-2 rounded border border-border/30 p-1.5">
-                                                <span
-                                                    className="mt-0.5 inline-block size-2 shrink-0 rounded-full"
-                                                    style={{ backgroundColor: nodeColor(node.id) }}
-                                                />
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="truncate font-medium" title={node.id}>{context}</div>
-                                                    {tabIdPart && (
-                                                        <div className="text-[10px] text-muted-foreground">
-                                                            tab <span className="font-mono">{tabIdPart}</span>
+                                    {[...nodesRef.current.values()].map(
+                                        (node) => {
+                                            const at = node.id.indexOf("@");
+                                            const context =
+                                                at >= 0
+                                                    ? node.id.slice(0, at)
+                                                    : node.id;
+                                            const tabIdPart =
+                                                at >= 0
+                                                    ? node.id.slice(at + 1)
+                                                    : null;
+                                            return (
+                                                <div
+                                                    key={node.id}
+                                                    className="flex items-start gap-2 rounded border border-border/30 p-1.5"
+                                                >
+                                                    <span
+                                                        className="mt-0.5 inline-block size-2 shrink-0 rounded-full"
+                                                        style={{
+                                                            backgroundColor:
+                                                                nodeColor(
+                                                                    node.id,
+                                                                ),
+                                                        }}
+                                                    />
+                                                    <div className="min-w-0 flex-1">
+                                                        <div
+                                                            className="truncate font-medium"
+                                                            title={node.id}
+                                                        >
+                                                            {context}
                                                         </div>
-                                                    )}
-                                                    {node.url && (
-                                                        <div className="truncate text-[10px] text-blue-400/70" title={node.url}>
-                                                            {node.url}
-                                                        </div>
-                                                    )}
+                                                        {tabIdPart && (
+                                                            <div className="text-[10px] text-muted-foreground">
+                                                                tab{" "}
+                                                                <span className="font-mono">
+                                                                    {tabIdPart}
+                                                                </span>
+                                                            </div>
+                                                        )}
+                                                        {node.url && (
+                                                            <div
+                                                                className="truncate text-[10px] text-blue-400/70"
+                                                                title={node.url}
+                                                            >
+                                                                {node.url}
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        );
-                                    })}
+                                            );
+                                        },
+                                    )}
                                 </div>
                             </div>
                         )}

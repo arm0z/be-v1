@@ -44,17 +44,8 @@ export function createAggregator(): Aggregator {
         }
     }
 
-    function resolveSource(tabId: string, url?: string): string {
-        const captured = tabSources.get(tabId);
-        if (captured) return captured;
-        if (url) {
-            try {
-                return `${new URL(url).hostname}@${tabId}`;
-            } catch {
-                // invalid URL, fall through
-            }
-        }
-        return `root@${tabId}`;
+    function resolveSource(tabId: string): string {
+        return tabSources.get(tabId) ?? `root@${tabId}`;
     }
 
     function ingest(capture: Capture, tabId: string): void {
@@ -139,7 +130,8 @@ export function createAggregator(): Aggregator {
             emitState();
             return;
         }
-        const source = resolveSource(tabId, url);
+        const source = resolveSource(tabId);
+        if (url) sourceUrls.set(source, url);
         if (source === bundler.getActiveSource()) return;
         dev.log(
             "navigation",
