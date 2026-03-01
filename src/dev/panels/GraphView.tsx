@@ -21,7 +21,11 @@ import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import { preprocess } from "@/aggregation/preprocess";
 
-type Props = { entries: DevEntry[]; onClear?: () => void };
+type Props = {
+    entries: DevEntry[];
+    onClear?: () => void;
+    onSend?: (msg: { type: string }) => void;
+};
 
 type Node = {
     id: string;
@@ -31,6 +35,7 @@ type Node = {
     vy: number;
     firstSeen: number;
     lastSeen: number;
+    url?: string;
 };
 type Edge = { from: string; to: string; weight: number };
 
@@ -99,7 +104,7 @@ function convexHull(points: [number, number][]): [number, number][] {
     return lower.concat(upper);
 }
 
-export function GraphView({ entries, onClear }: Props) {
+export function GraphView({ entries, onClear, onSend }: Props) {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasWrapRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -219,6 +224,7 @@ export function GraphView({ entries, onClear }: Props) {
         // Find the latest state.snapshot entry since last processed
         type SnapshotData = {
             transitions: { from: string; to: string; ts: number; dwellMs: number }[];
+            sourceUrls?: Record<string, string>;
         };
         let latestSnapshot: SnapshotData | null = null;
         for (let i = processedRef.current; i < entries.length; i++) {
@@ -287,6 +293,15 @@ export function GraphView({ entries, onClear }: Props) {
                 });
             } else {
                 nodes.get(id)!.lastSeen = timestamp;
+            }
+        }
+
+        // Attach last known URL to each node
+        const urls = latestSnapshot.sourceUrls;
+        if (urls) {
+            for (const [source, url] of Object.entries(urls)) {
+                const node = nodes.get(source);
+                if (node) node.url = url;
             }
         }
 
@@ -620,7 +635,7 @@ export function GraphView({ entries, onClear }: Props) {
                 ctx.setLineDash([]);
             }
 
-            // Source ID label
+            // Source ID label + URL
             const showLabel = !dim || connectedSet.has(node.id);
             if (showLabel) {
                 ctx.textAlign = "center";
@@ -628,6 +643,14 @@ export function GraphView({ entries, onClear }: Props) {
                 ctx.font = "11px sans-serif";
                 ctx.fillStyle = "rgba(220,220,220,0.9)";
                 ctx.fillText(node.id, node.x, node.y + NODE_RADIUS + 4);
+                if (node.url) {
+                    try {
+                        const host = new URL(node.url).hostname.replace(/^www\./, "");
+                        ctx.font = "9px sans-serif";
+                        ctx.fillStyle = "rgba(160,180,220,0.7)";
+                        ctx.fillText(host, node.x, node.y + NODE_RADIUS + 18);
+                    } catch { /* invalid url */ }
+                }
             }
         }
 
@@ -920,6 +943,11 @@ export function GraphView({ entries, onClear }: Props) {
                     <div className="truncate text-sm font-semibold">
                         {node.id}
                     </div>
+                    {node.url && (
+                        <div className="truncate text-[10px] text-muted-foreground" title={node.url}>
+                            {node.url}
+                        </div>
+                    )}
 
                     <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-0.5 border-t border-border/30 pt-2">
                         <span className="text-muted-foreground">Degree</span>
@@ -1037,11 +1065,14 @@ export function GraphView({ entries, onClear }: Props) {
                     {onClear && (
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <Button variant="outline" size="icon-xs" onClick={onClear}>
+                                <Button variant="outline" size="icon-xs" onClick={() => {
+                                    onSend?.({ type: "state.reset" });
+                                    onClear();
+                                }}>
                                     <Trash2 />
                                 </Button>
                             </TooltipTrigger>
-                            <TooltipContent>Clear all</TooltipContent>
+                            <TooltipContent>Reset all state</TooltipContent>
                         </Tooltip>
                     )}
                     <Tooltip>

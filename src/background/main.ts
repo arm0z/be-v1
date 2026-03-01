@@ -334,7 +334,12 @@ if (import.meta.env.DEV) {
               type: "setChannelFilter";
               channels: Partial<Record<DevChannel, boolean>>;
           }
-        | { type: "setEventFilter"; events: Partial<Record<string, boolean>> };
+        | { type: "setEventFilter"; events: Partial<Record<string, boolean>> }
+        | { type: "sync.flush" }
+        | { type: "sync.send" }
+        | { type: "checkpoint.save" }
+        | { type: "sync.drain_retry" }
+        | { type: "state.reset" };
 
     const filter: DevFilter = {
         channels: {
@@ -415,22 +420,34 @@ if (import.meta.env.DEV) {
                     } satisfies DevMessage);
                 }
             }
+            if (msg.type === "sync.flush") {
+                const packet = packer.flush();
+                dev.log(
+                    "sync",
+                    "sync.flush",
+                    packet ? `packet ${packet.id}` : "nothing to flush",
+                    { packet: packet ?? null },
+                );
+            }
+            if (msg.type === "sync.send") {
+                dev.log("sync", "sync.send", "flush & sync triggered");
+                flushAndSync();
+            }
+            if (msg.type === "checkpoint.save") {
+                checkpointer.save();
+                // checkpointer.save() logs its own checkpoint.written event
+            }
+            if (msg.type === "sync.drain_retry") {
+                dev.log("sync", "sync.drain_retry", "draining retry queue");
+                drainRetryQueue();
+            }
+            if (msg.type === "state.reset") {
+                logs.length = 0;
+                packer.flush(); // seal + drain aggregator
+                chrome.storage.local.remove(["checkpoint", "retryQueue"]);
+                dev.log("sync", "state.reset", "all state cleared");
+            }
         });
-    });
-
-    // Manual flush via dev message
-    chrome.runtime.onMessage.addListener((msg) => {
-        if (msg.type === "dev:flush") {
-            const packet = packer.flush();
-            dev.log(
-                "sync",
-                "packet.manual-flush",
-                packet ? `packet ${packet.id}` : "nothing to flush",
-                {
-                    packet: packet ?? null,
-                },
-            );
-        }
     });
 
     // Service worker's own dev.log calls go directly to receive(),

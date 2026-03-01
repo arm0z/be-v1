@@ -75,7 +75,12 @@ export function useDevPort() {
             });
 
             port.onDisconnect.addListener(() => {
-                portRef.current = null;
+                // Guard: only clear the ref if it still points to THIS port.
+                // React StrictMode double-fires effects; the first port's
+                // async onDisconnect must not wipe the second port's ref.
+                if (portRef.current === port) {
+                    portRef.current = null;
+                }
                 // service worker died — reconnect after a short delay
                 if (!disposed) {
                     timer = setTimeout(connect, RECONNECT_MS);
@@ -110,15 +115,19 @@ export function useDevPort() {
             if (!prev) return prev;
             return {
                 ...prev,
-                events: { ...prev.events, ...events },
+                events: { ...prev.events, ...events } as DevFilter["events"],
             };
         });
         portRef.current?.postMessage({ type: "setEventFilter", events });
+    }
+
+    function send(msg: { type: string }) {
+        portRef.current?.postMessage(msg);
     }
 
     function clear() {
         setEntries([]);
     }
 
-    return { entries, filter, setChannelFilter, setEventFilter, clear };
+    return { entries, filter, setChannelFilter, setEventFilter, send, clear };
 }

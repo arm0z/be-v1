@@ -8,6 +8,7 @@ import { dev } from "../event/dev.ts";
 export function createAggregator(): Aggregator {
     const bundler = createBundler();
     const tabSources = new Map<string, string>();
+    const sourceUrls = new Map<string, string>();
     const pendingSignals = new Map<
         string,
         { signal: Signal; tabId: string }[]
@@ -34,6 +35,7 @@ export function createAggregator(): Aggregator {
                 })),
             })),
             transitions: bundler.getTransitions(),
+            sourceUrls: Object.fromEntries(sourceUrls),
         });
     }
 
@@ -54,6 +56,9 @@ export function createAggregator(): Aggregator {
     function ingest(capture: Capture, tabId: string): void {
         const source = `${capture.context}@${tabId}`;
         tabSources.set(tabId, source);
+        if (capture.type === "html.content") {
+            sourceUrls.set(source, capture.payload.url);
+        }
         dev.log("aggregator", capture.type, source, {
             tabId,
             source,
@@ -96,6 +101,13 @@ export function createAggregator(): Aggregator {
             return;
         }
 
+        if (
+            signal.type === "nav.completed" ||
+            signal.type === "nav.spa" ||
+            signal.type === "nav.title_changed"
+        ) {
+            sourceUrls.set(source, signal.payload.url);
+        }
         dev.log("aggregator", signal.type, source, {
             tabId,
             source,

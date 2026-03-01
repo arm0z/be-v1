@@ -4,6 +4,7 @@ import {
     ChevronsUpDown,
     LayoutList,
     RefreshCw,
+    Save,
     Trash2,
 } from "lucide-react";
 import type { Bundle, Checkpoint, Transition } from "@/aggregation/types";
@@ -368,7 +369,11 @@ function useCheckpointStorage() {
 
 // ── Main Component ──────────────────────────────────────────────────
 
-export function CheckpointInspector() {
+export function CheckpointInspector({
+    onSend,
+}: {
+    onSend?: (msg: { type: string }) => void;
+}) {
     const [format, setFormat] = useState("formatted");
     const { cp, loading, refresh, clear } = useCheckpointStorage();
 
@@ -379,15 +384,49 @@ export function CheckpointInspector() {
 
     return (
         <div className="flex h-full flex-col overflow-hidden">
-            <div className="flex shrink-0 items-center justify-between gap-2 px-4 pt-3">
+            <div className="flex shrink-0 items-center gap-2 px-4 pt-3">
+                <div className="flex items-center gap-1">
+                    {onSend && (
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="xs"
+                                    onClick={() =>
+                                        onSend({ type: "checkpoint.save" })
+                                    }
+                                    className="text-muted-foreground"
+                                >
+                                    <Save className="size-3" />
+                                    Save
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                Save checkpoint now
+                            </TooltipContent>
+                        </Tooltip>
+                    )}
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                onClick={refresh}
+                                className="text-muted-foreground"
+                            >
+                                <RefreshCw />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Refresh</TooltipContent>
+                    </Tooltip>
+                </div>
                 {cp && (
                     <span className="text-xs text-muted-foreground">
                         {cp.sealed.length} sealed, {cp.transitions.length}{" "}
                         transitions, {age} ago
                     </span>
                 )}
-                {!cp && <span />}
-                <div className="flex items-center gap-2">
+                <div className="ml-auto flex items-center gap-2">
                     <Tabs value={format} onValueChange={setFormat}>
                         <TabsList className="h-auto border border-border bg-popover/80 p-0.5 backdrop-blur-sm">
                             <TabsTrigger
@@ -406,19 +445,6 @@ export function CheckpointInspector() {
                             </TabsTrigger>
                         </TabsList>
                     </Tabs>
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Button
-                                variant="ghost"
-                                size="icon-xs"
-                                onClick={refresh}
-                                className="text-muted-foreground"
-                            >
-                                <RefreshCw />
-                            </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Refresh</TooltipContent>
-                    </Tooltip>
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <Button

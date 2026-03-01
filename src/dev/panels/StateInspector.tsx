@@ -7,7 +7,10 @@ import {
     ClipboardCheck,
     ClipboardCopy,
     LayoutList,
+    Package,
+    RotateCcw,
     Trash2,
+    Upload,
 } from "lucide-react";
 import type {
     DevCaptureSummary,
@@ -504,9 +507,11 @@ function FormattedState({ snapshot }: { snapshot: DevStateSnapshot }) {
 
 export function StateInspector({
     entries,
+    onSend,
     onClear,
 }: {
     entries: DevEntry[];
+    onSend?: (msg: { type: string }) => void;
     onClear?: () => void;
 }) {
     const [format, setFormat] = useState("formatted");
@@ -522,40 +527,75 @@ export function StateInspector({
 
     return (
         <div className="flex h-full flex-col overflow-hidden">
-            <div className="flex shrink-0 items-center justify-end gap-2 px-4 pt-3">
-                <Tabs value={format} onValueChange={setFormat}>
-                    <TabsList className="h-auto border border-border bg-popover/80 p-0.5 backdrop-blur-sm">
-                        <TabsTrigger
-                            value="formatted"
-                            className="h-auto px-2 py-0.5 text-xs"
+            <div className="flex shrink-0 items-center justify-between gap-2 px-4 pt-3">
+                {onSend ? (
+                    <div className="flex items-center gap-1">
+                        <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => onSend({ type: "sync.flush" })}
+                            className="text-muted-foreground"
                         >
-                            <LayoutList className="size-3" />
-                            Formatted
-                        </TabsTrigger>
-                        <TabsTrigger
-                            value="json"
-                            className="h-auto px-2 py-0.5 text-xs"
+                            <Package className="size-3" />
+                            Flush
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => onSend({ type: "sync.send" })}
+                            className="text-muted-foreground"
                         >
-                            <Braces className="size-3" />
-                            JSON
-                        </TabsTrigger>
-                    </TabsList>
-                </Tabs>
-                {onClear && (
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Button
-                                variant="ghost"
-                                size="icon-xs"
-                                onClick={onClear}
-                                className="text-muted-foreground"
-                            >
-                                <Trash2 />
-                            </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Clear all</TooltipContent>
-                    </Tooltip>
+                            <Upload className="size-3" />
+                            Send
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => onSend({ type: "sync.drain_retry" })}
+                            className="text-muted-foreground"
+                        >
+                            <RotateCcw className="size-3" />
+                            Retry
+                        </Button>
+                    </div>
+                ) : (
+                    <span />
                 )}
+                <div className="flex items-center gap-2">
+                    <Tabs value={format} onValueChange={setFormat}>
+                        <TabsList className="h-auto border border-border bg-popover/80 p-0.5 backdrop-blur-sm">
+                            <TabsTrigger
+                                value="formatted"
+                                className="h-auto px-2 py-0.5 text-xs"
+                            >
+                                <LayoutList className="size-3" />
+                                Formatted
+                            </TabsTrigger>
+                            <TabsTrigger
+                                value="json"
+                                className="h-auto px-2 py-0.5 text-xs"
+                            >
+                                <Braces className="size-3" />
+                                JSON
+                            </TabsTrigger>
+                        </TabsList>
+                    </Tabs>
+                    {onClear && (
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant="ghost"
+                                    size="icon-xs"
+                                    onClick={onClear}
+                                    className="text-muted-foreground"
+                                >
+                                    <Trash2 />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Clear all</TooltipContent>
+                        </Tooltip>
+                    )}
+                </div>
             </div>
             <div className="dev-scrollbar min-h-0 flex-1 overflow-auto p-4">
                 {!snapshot && (

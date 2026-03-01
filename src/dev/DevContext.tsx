@@ -6,6 +6,7 @@ export type DevCtx = {
     filter: DevFilter | null;
     setChannelFilter: (channels: Partial<Record<DevChannel, boolean>>) => void;
     setEventFilter: (events: Partial<Record<string, boolean>>) => void;
+    send: (msg: { type: string }) => void;
     clear: () => void;
 };
 

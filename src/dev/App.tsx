@@ -40,10 +40,10 @@ import { useDevPort } from "./useDevPort";
 /* ── panel wrappers (consume shared state via context) ────────── */
 
 function GraphPanel(_props: IDockviewPanelProps) {
-    const { entries, clear } = useDevContext();
+    const { entries, send, clear } = useDevContext();
     return (
         <ErrorBoundary>
-            <GraphView entries={entries} onClear={clear} />
+            <GraphView entries={entries} onSend={send} onClear={clear} />
         </ErrorBoundary>
     );
 }
@@ -64,18 +64,19 @@ function LogsPanel(_props: IDockviewPanelProps) {
 }
 
 function StatePanel(_props: IDockviewPanelProps) {
-    const { entries, clear } = useDevContext();
+    const { entries, send, clear } = useDevContext();
     return (
         <ErrorBoundary>
-            <StateInspector entries={entries} onClear={clear} />
+            <StateInspector entries={entries} onSend={send} onClear={clear} />
         </ErrorBoundary>
     );
 }
 
 function CheckpointPanel(_props: IDockviewPanelProps) {
+    const { send } = useDevContext();
     return (
         <ErrorBoundary>
-            <CheckpointInspector />
+            <CheckpointInspector onSend={send} />
         </ErrorBoundary>
     );
 }
