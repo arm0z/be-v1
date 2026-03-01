@@ -1,0 +1,9 @@
+[project]
+name = "srv"
+version = "0.1.0"
+description = "Hourglass packet viewer — receives Packet payloads from packer.ts"
+requires-python = ">=3.12"
+dependencies = ["flask>=3.0"]
+
+[project.scripts]
+srv = "main:run"
