@@ -1,5 +1,5 @@
 """
-Hourglass packet viewer — receives Packet payloads from packer.ts.
+Browser extension packet viewer — receives Packet payloads from packer.ts.
 
 Usage:
     uv run main.py
@@ -25,6 +25,7 @@ def cors(response):
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     return response
+
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "data.db")
 
@@ -212,7 +213,9 @@ def index() -> tuple:
             received_time = received_full
 
         # Classify group IDs
-        singletons = sum(1 for gr in groups if gr.get("id", "").startswith("singleton:"))
+        singletons = sum(
+            1 for gr in groups if gr.get("id", "").startswith("singleton:")
+        )
         communities = sum(
             1
             for gr in groups
@@ -245,7 +248,7 @@ def index() -> tuple:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {TW_HEAD}
-<title>Packets :: Hourglass</title>
+<title>Packets :: Sink</title>
 <style type="text/tailwindcss">
 @layer base {{
   a {{ @apply text-hg-blue hover:underline; }}
@@ -256,7 +259,7 @@ def index() -> tuple:
 </head><body class="font-mono text-[13px] bg-hg-bg text-hg-text p-2 sm:p-3 md:p-6">
 <div class="flex items-center justify-between mb-4">
 <h1 class="text-xs sm:text-sm text-hg-muted font-normal">
-  <span class="text-hg-blue">hourglass</span> / packets &mdash; {len(rows)} record(s)
+  <span class="text-hg-blue">sink</span> / packets &mdash; {len(rows)} record(s)
   {' <form method="POST" action="/clear" class="inline" onsubmit="return confirm(\'Delete all records?\')"><button class="ml-3 px-2.5 py-0.5 text-[11px] font-mono border border-hg-red rounded text-hg-red bg-transparent cursor-pointer hover:bg-hg-red hover:text-hg-bg">Clear all</button></form>' if rows else ""}
 </h1>
 <button onclick="location.reload()" class="px-2.5 py-0.5 text-[11px] font-mono border border-hg-border rounded text-hg-muted bg-transparent cursor-pointer hover:text-hg-text hover:border-hg-blue">Reload</button>
@@ -511,7 +514,7 @@ def packet_detail_json(row_id: str) -> tuple:
 def run():
     init_db()
     port = int(os.environ.get("PORT", 5000))
-    print(f"Hourglass packet server on http://localhost:{port}")
+    print(f"Sink packet server on http://localhost:{port}")
     app.run(host="0.0.0.0", port=port, debug=True)
 
 
