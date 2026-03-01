@@ -1,6 +1,7 @@
 import {
     Boxes,
-    ClipboardCopy,
+    Clipboard,
+    Download,
     Eclipse,
     Expand,
     GitGraph,
@@ -187,7 +188,13 @@ type EdgeTableProps = {
     sourceUrls: Record<string, string>;
 };
 
-function SourceCell({ id, urls }: { id: string; urls: Record<string, string> }) {
+function SourceCell({
+    id,
+    urls,
+}: {
+    id: string;
+    urls: Record<string, string>;
+}) {
     const url = urls[id] ?? "";
     return (
         <span className="flex flex-col leading-tight">
@@ -207,7 +214,12 @@ function SourceCell({ id, urls }: { id: string; urls: Record<string, string> }) 
     );
 }
 
-function EdgeTable({ transitions, grouped, louvain, sourceUrls }: EdgeTableProps) {
+function EdgeTable({
+    transitions,
+    grouped,
+    louvain,
+    sourceUrls,
+}: EdgeTableProps) {
     if (transitions.length === 0) {
         return (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -289,10 +301,15 @@ function EdgeTable({ transitions, grouped, louvain, sourceUrls }: EdgeTableProps
                                         <span
                                             className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
                                             style={{
-                                                backgroundColor: communityColor(t.from),
+                                                backgroundColor: communityColor(
+                                                    t.from,
+                                                ),
                                             }}
                                         />
-                                        <SourceCell id={t.from} urls={sourceUrls} />
+                                        <SourceCell
+                                            id={t.from}
+                                            urls={sourceUrls}
+                                        />
                                     </span>
                                 </td>
                                 <td className="px-1 py-1.5 text-muted-foreground">
@@ -303,10 +320,15 @@ function EdgeTable({ transitions, grouped, louvain, sourceUrls }: EdgeTableProps
                                         <span
                                             className="mt-0.5 inline-block size-1.5 shrink-0 rounded-full"
                                             style={{
-                                                backgroundColor: communityColor(t.to),
+                                                backgroundColor: communityColor(
+                                                    t.to,
+                                                ),
                                             }}
                                         />
-                                        <SourceCell id={t.to} urls={sourceUrls} />
+                                        <SourceCell
+                                            id={t.to}
+                                            urls={sourceUrls}
+                                        />
                                     </span>
                                 </td>
                                 <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
@@ -581,9 +603,22 @@ export function GraphView({ entries, onClear, onSend }: Props) {
             }
         }
 
+        // Compute first/last seen from transition timestamps
+        const firstSeenMap = new Map<string, number>();
+        const lastSeenMap = new Map<string, number>();
+        for (const t of transitions) {
+            for (const id of [t.from, t.to]) {
+                const prev = firstSeenMap.get(id);
+                if (prev === undefined || t.ts < prev)
+                    firstSeenMap.set(id, t.ts);
+                const last = lastSeenMap.get(id);
+                if (last === undefined || t.ts > last)
+                    lastSeenMap.set(id, t.ts);
+            }
+        }
+
         // Update nodes — preserve positions for existing, add new ones near neighbors
         const nodes = nodesRef.current;
-        const timestamp = Date.now();
 
         // Remove nodes no longer in the transition set
         for (const id of nodes.keys()) {
@@ -615,11 +650,13 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                     y: ny,
                     vx: 0,
                     vy: 0,
-                    firstSeen: timestamp,
-                    lastSeen: timestamp,
+                    firstSeen: firstSeenMap.get(id) ?? 0,
+                    lastSeen: lastSeenMap.get(id) ?? 0,
                 });
             } else {
-                nodes.get(id)!.lastSeen = timestamp;
+                const node = nodes.get(id)!;
+                node.firstSeen = firstSeenMap.get(id) ?? node.firstSeen;
+                node.lastSeen = lastSeenMap.get(id) ?? node.lastSeen;
             }
         }
 
@@ -647,6 +684,20 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                 oldPositions.set(id, { x: node.x, y: node.y });
             }
 
+            // Compute first/last seen from transition timestamps
+            const firstSeenMap = new Map<string, number>();
+            const lastSeenMap = new Map<string, number>();
+            for (const t of groupedResult.pr.transitions) {
+                for (const id of [t.from, t.to]) {
+                    const prev = firstSeenMap.get(id);
+                    if (prev === undefined || t.ts < prev)
+                        firstSeenMap.set(id, t.ts);
+                    const last = lastSeenMap.get(id);
+                    if (last === undefined || t.ts > last)
+                        lastSeenMap.set(id, t.ts);
+                }
+            }
+
             nodes.clear();
             edges.clear();
 
@@ -658,8 +709,8 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                     y: old?.y ?? (Math.random() - 0.5) * 200,
                     vx: 0,
                     vy: 0,
-                    firstSeen: 0,
-                    lastSeen: 0,
+                    firstSeen: firstSeenMap.get(nodeId) ?? 0,
+                    lastSeen: lastSeenMap.get(nodeId) ?? 0,
                     url: latestSnapshot.sourceUrls[nodeId],
                 });
             }
@@ -1300,6 +1351,41 @@ export function GraphView({ entries, onClear, onSend }: Props) {
         panRef.current.y = -cy * zoom;
     }, []);
 
+    const exportAsJpg = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        // Save current view
+        const prevZoom = zoomRef.current;
+        const prevPanX = panRef.current.x;
+        const prevPanY = panRef.current.y;
+
+        // Apply fit-to-view
+        fitToView();
+
+        // Redraw with fitted view
+        draw();
+
+        canvas.toBlob(
+            (blob) => {
+                if (!blob) return;
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `graph-${Date.now()}.jpg`;
+                a.click();
+                URL.revokeObjectURL(url);
+
+                // Restore previous view
+                zoomRef.current = prevZoom;
+                panRef.current.x = prevPanX;
+                panRef.current.y = prevPanY;
+            },
+            "image/jpeg",
+            0.95,
+        );
+    }, [fitToView, draw]);
+
     const copyGraphText = useCallback(() => {
         const transitions =
             activeTab === "grouped" && groupedResult
@@ -1352,7 +1438,12 @@ export function GraphView({ entries, onClear, onSend }: Props) {
         }
 
         navigator.clipboard.writeText(lines.join("\n"));
-    }, [activeTab, groupedResult, latestTransitions, latestSnapshot.sourceUrls]);
+    }, [
+        activeTab,
+        groupedResult,
+        latestTransitions,
+        latestSnapshot.sourceUrls,
+    ]);
 
     // --- tooltip stats ---
     function getStats(nodeId: string) {
@@ -1647,12 +1738,10 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                                     size="icon-xs"
                                     onClick={copyGraphText}
                                 >
-                                    <ClipboardCopy />
+                                    <Clipboard />
                                 </Button>
                             </TooltipTrigger>
-                            <TooltipContent>
-                                Copy graph (LLM-readable)
-                            </TooltipContent>
+                            <TooltipContent>Copy graph</TooltipContent>
                         </Tooltip>
                     )}
                     {viewMode === "graph" && (
@@ -1711,6 +1800,18 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                                     </Button>
                                 </TooltipTrigger>
                                 <TooltipContent>Fit to view</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant="outline"
+                                        size="icon-xs"
+                                        onClick={exportAsJpg}
+                                    >
+                                        <Download />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Export as JPG</TooltipContent>
                             </Tooltip>
                         </>
                     )}

@@ -2,10 +2,13 @@ import {
     Braces,
     ChevronsDownUp,
     ChevronsUpDown,
+    CircleOff,
+    HardDrive,
     LayoutList,
     RefreshCw,
     Save,
     Trash2,
+    X,
 } from "lucide-react";
 import type { Bundle, Checkpoint, Transition } from "@/aggregation/types";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -17,11 +20,16 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function formatTime(ms: number): string {
-    return new Date(ms).toLocaleTimeString();
+    return new Date(ms).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+    });
 }
 
 function formatDuration(ms: number): string {
@@ -337,15 +345,39 @@ function useCheckpointStorage() {
             return;
         }
         setLoading(true);
-        chrome.storage.local.get("checkpoint").then((result) => {
-            setCp((result.checkpoint as Checkpoint | undefined) ?? null);
-            setLoading(false);
-        });
+        chrome.storage.local
+            .get("checkpoint")
+            .then((result) => {
+                const loaded = (result.checkpoint as Checkpoint | undefined) ?? null;
+                setCp(loaded);
+                setLoading(false);
+                toast(loaded ? "Checkpoint loaded" : "No checkpoint found", {
+                    icon: loaded ? <HardDrive className="size-4" /> : <CircleOff className="size-4" />,
+                });
+            })
+            .catch((err: unknown) => {
+                setLoading(false);
+                toast("Failed to load checkpoint — " + String(err), {
+                    icon: <X className="size-4" />,
+                });
+            });
     }, []);
 
     const clear = useCallback(() => {
         if (!chrome.storage?.local) return;
-        chrome.storage.local.remove("checkpoint").then(() => setCp(null));
+        chrome.storage.local
+            .remove("checkpoint")
+            .then(() => {
+                setCp(null);
+                toast("Checkpoint cleared", {
+                    icon: <Trash2 className="size-4" />,
+                });
+            })
+            .catch((err: unknown) => {
+                toast("Failed to clear checkpoint — " + String(err), {
+                    icon: <X className="size-4" />,
+                });
+            });
     }, []);
 
     useEffect(() => {

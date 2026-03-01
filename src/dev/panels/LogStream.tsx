@@ -70,7 +70,7 @@ type LogGroup = {
 
 function formatTimestamp(ts: number) {
     const d = new Date(ts);
-    return d.toLocaleTimeString("en-GB", {
+    return d.toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",

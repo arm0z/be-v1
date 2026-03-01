@@ -17,6 +17,7 @@ export default defineManifest({
     permissions: [
         "alarms",
         "contentSettings",
+        "storage",
         "tabs",
         "webNavigation",
         "idle",

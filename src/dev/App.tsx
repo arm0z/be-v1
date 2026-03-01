@@ -6,13 +6,13 @@ import {
     type IDockviewPanelProps,
 } from "dockview";
 import {
-    Box,
     ExternalLink,
     GitGraph,
     HardDrive,
     Maximize2,
     Menu,
     Minimize2,
+    Package,
     ScrollText,
     X,
 } from "lucide-react";
@@ -32,10 +32,12 @@ import { DevContext, useDevContext } from "./DevContext";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { GraphView } from "./panels/GraphView";
 import { LogStream } from "./panels/LogStream";
-import { StateInspector } from "./panels/StateInspector";
+import { PacketInspector } from "./panels/PacketInspector";
 import { CheckpointInspector } from "./panels/CheckpointInspector";
+import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useDevPort } from "./useDevPort";
+import { useDevToasts } from "./useDevToasts";
 
 /* ── panel wrappers (consume shared state via context) ────────── */
 
@@ -63,11 +65,11 @@ function LogsPanel(_props: IDockviewPanelProps) {
     );
 }
 
-function StatePanel(_props: IDockviewPanelProps) {
-    const { entries, send, clear } = useDevContext();
+function PacketPanel(_props: IDockviewPanelProps) {
+    const { entries, send } = useDevContext();
     return (
         <ErrorBoundary>
-            <StateInspector entries={entries} onSend={send} onClear={clear} />
+            <PacketInspector entries={entries} onSend={send} />
         </ErrorBoundary>
     );
 }
@@ -86,7 +88,7 @@ function CheckpointPanel(_props: IDockviewPanelProps) {
 const iconMap: Record<string, ReactElement> = {
     graph: <GitGraph className="mr-1.5 h-3.5 w-3.5" />,
     logs: <ScrollText className="mr-1.5 h-3.5 w-3.5" />,
-    state: <Box className="mr-1.5 h-3.5 w-3.5" />,
+    packet: <Package className="mr-1.5 h-3.5 w-3.5" />,
     checkpoint: <HardDrive className="mr-1.5 h-3.5 w-3.5" />,
 };
 
@@ -116,7 +118,7 @@ function TabIcon({ api, params }: IDockviewPanelProps) {
 const panelDefs = [
     { type: "graph", component: "graph", title: "Graph" },
     { type: "logs", component: "logs", title: "Log" },
-    { type: "state", component: "state", title: "State" },
+    { type: "packet", component: "packet", title: "Packet" },
     { type: "checkpoint", component: "checkpoint", title: "Checkpoint" },
 ] as const;
 
@@ -211,7 +213,7 @@ function RightActions({
 const components = {
     graph: GraphPanel,
     logs: LogsPanel,
-    state: StatePanel,
+    packet: PacketPanel,
     checkpoint: CheckpointPanel,
 };
 
@@ -234,6 +236,7 @@ const neutralTheme: DockviewTheme = {
 
 export default function App() {
     const port = useDevPort();
+    useDevToasts(port.entries);
 
     const onReady = useCallback((event: DockviewReadyEvent) => {
         for (const def of panelDefs) {
@@ -271,6 +274,11 @@ export default function App() {
                     tabComponents={tabComponents}
                     rightHeaderActionsComponent={headerActions.right}
                     onReady={onReady}
+                />
+                <Toaster
+                    theme="dark"
+                    position="bottom-right"
+                    toastOptions={{ duration: 3000 }}
                 />
             </DevContext.Provider>
         </TooltipProvider>

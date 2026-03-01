@@ -4,8 +4,8 @@ import {
     ChevronUp,
     ChevronsDownUp,
     ChevronsUpDown,
+    Clipboard,
     ClipboardCheck,
-    ClipboardCopy,
     LayoutList,
     Package,
     RotateCcw,
@@ -31,7 +31,11 @@ import { writeClipboard } from "@/lib/utils";
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function formatTime(ms: number): string {
-    return new Date(ms).toLocaleTimeString();
+    return new Date(ms).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+    });
 }
 
 function formatDuration(ms: number): string {
@@ -234,7 +238,7 @@ function CopyBundleButton({
                     {copied ? (
                         <ClipboardCheck className="h-3.5 w-3.5" />
                     ) : (
-                        <ClipboardCopy className="h-3.5 w-3.5" />
+                        <Clipboard className="h-3.5 w-3.5" />
                     )}
                 </Button>
             </TooltipTrigger>
