@@ -1,15 +1,17 @@
 import { dev } from "./dev.ts";
 
 /**
- * Page Visibility API tracking — runs in every content script.
+ * Visibility tracking — runs in every content script.
  *
- * Reports whether the page is *rendered on screen* (the tab is the
- * foreground tab in a non-minimized window). This is true even when
- * the window does NOT have OS-level focus, so multiple tabs across
- * monitors can be "visible" simultaneously.
+ * Uses three signals to determine whether the user is looking at this tab:
+ *   1. visibilitychange — tab shown/hidden (tab switch, minimize)
+ *   2. window focus      — browser window gains OS-level focus
+ *   3. window blur       — browser window loses OS-level focus
  *
- * "Active" (selected tab in the focused window) is tracked separately
- * by the service worker via chrome.tabs / chrome.windows APIs.
+ * visibilitychange alone is NOT enough: switching between two Chrome
+ * windows that are both on-screen (e.g. different monitors) does not
+ * fire visibilitychange because both tabs remain "visible".
+ * focus/blur catches these window-to-window and alt-tab transitions.
  */
 
 let lastState: boolean | null = null;
@@ -37,10 +39,18 @@ function send(visible: boolean): void {
         });
 }
 
-/** Attach Page Visibility API listeners. Call once from the content script entry point. */
+/** Attach visibility listeners. Call once from the content script entry point. */
 export function setupVisibility(): void {
     document.addEventListener("visibilitychange", () => {
         send(document.visibilityState === "visible");
+    });
+
+    window.addEventListener("focus", () => {
+        send(true);
+    });
+
+    window.addEventListener("blur", () => {
+        send(false);
     });
 
     // Re-send state when page is restored from bfcache (content script

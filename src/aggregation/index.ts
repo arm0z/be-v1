@@ -28,9 +28,10 @@ export function createAggregator(): Aggregator {
         string,
         { signal: Signal; tabId: string }[]
     >();
-    const activeTabPerWindow = new Map<number, string>();
     let offBrowserTimer: ReturnType<typeof setTimeout> | null = null;
-    const OFF_BROWSER_SETTLE_MS = 200;
+    const OFF_BROWSER_SETTLE_MS = 500;
+
+    let visibleTabId: string | null = null;
 
     function emitState() {
         dev.log("aggregator", "state.snapshot", "state", {
@@ -62,6 +63,10 @@ export function createAggregator(): Aggregator {
             const url = signalPageUrl(p.signal);
             if (url) graph.recordUrl(source, url);
         }
+    }
+
+    function resolveSource(tabId: string): string {
+        return tabSources.get(tabId) ?? `root@${tabId}`;
     }
 
     function ingest(capture: Capture, tabId: string): void {
@@ -123,101 +128,49 @@ export function createAggregator(): Aggregator {
         if (signal.type === "tab.closed") {
             tabSources.delete(tabId);
             pendingSignals.delete(tabId);
-            for (const [windowId, activeTabId] of activeTabPerWindow.entries()) {
-                if (activeTabId === tabId) {
-                    activeTabPerWindow.delete(windowId);
-                }
+            if (visibleTabId === tabId) {
+                visibleTabId = null;
+                startOffBrowserTimer();
             }
         }
         emitState();
     }
 
-    function cancelOffBrowser(): void {
-        if (offBrowserTimer !== null) {
-            clearTimeout(offBrowserTimer);
-            offBrowserTimer = null;
-            dev.log("navigation", "off_browser.cancel", "off-browser timer cancelled — user returned to Chrome");
-        }
-    }
-
     function startOffBrowserTimer(): void {
-        cancelOffBrowser();
-        bundler.seal();
-        dev.log("navigation", "off_browser.start", `off-browser timer started (${OFF_BROWSER_SETTLE_MS}ms settle)`);
+        if (offBrowserTimer !== null) clearTimeout(offBrowserTimer);
+        dev.log("navigation", "off_browser.start", `off-browser timer started (${OFF_BROWSER_SETTLE_MS}ms)`);
         offBrowserTimer = setTimeout(() => {
             offBrowserTimer = null;
-            dev.log("navigation", "off_browser.commit", "off-browser timer fired — transitioning to off_browser");
+            dev.log("navigation", "off_browser.commit", "transitioning to off_browser");
             bundler.transition(OFF_BROWSER);
             emitState();
         }, OFF_BROWSER_SETTLE_MS);
     }
 
-    function onTabActivated(tabId: string, windowId: number): void {
-        const prevTabId = activeTabPerWindow.get(windowId);
-        activeTabPerWindow.set(windowId, tabId);
-
-        if (offBrowserTimer !== null) {
-            if (prevTabId === tabId) {
-                dev.log("navigation", "tab.spurious", `ignoring spurious activation for same tab ${tabId} during off-browser settle`, {
-                    tabId, windowId,
-                });
-                return;
+    function onVisibilityChanged(tabId: string, visible: boolean): void {
+        if (visible) {
+            if (offBrowserTimer !== null) {
+                clearTimeout(offBrowserTimer);
+                offBrowserTimer = null;
+                dev.log("navigation", "off_browser.cancel", "off-browser timer cancelled");
             }
-            dev.log("navigation", "tab.override_settle", `new tab ${tabId} activated during off-browser settle — cancelling timer`, {
-                tabId, prevTabId, windowId,
-            });
-            cancelOffBrowser();
-        }
-
-        let source = tabSources.get(tabId);
-        const isNew = !source;
-        if (!source) {
-            source = `root@${tabId}`;
-            tabSources.set(tabId, source);
-        }
-        dev.log("navigation", "tab.resolved", `tab ${tabId} → source ${source}${isNew ? " (new)" : ""}`, {
-            tabId, windowId, source, prevTabId, isNew,
-        });
-        bundler.transition(source);
-        emitState();
-    }
-
-    function onWindowFocusChanged(windowId: number): void {
-        if (windowId === chrome.windows.WINDOW_ID_NONE) {
-            startOffBrowserTimer();
+            visibleTabId = tabId;
+            const source = resolveSource(tabId);
+            if (source === bundler.getActiveSource()) return;
+            dev.log("navigation", "tab.visible", `tab ${tabId} visible → ${source}`, { tabId, source });
+            bundler.transition(source);
+            emitState();
         } else {
-            cancelOffBrowser();
-            const tabId = activeTabPerWindow.get(windowId);
-            if (tabId) {
-                let source = tabSources.get(tabId);
-                const isNew = !source;
-                if (!source) {
-                    source = `root@${tabId}`;
-                    tabSources.set(tabId, source);
-                }
-                dev.log("navigation", "window.resolved", `window ${windowId} → tab ${tabId} → source ${source}${isNew ? " (new)" : ""}`, {
-                    windowId, tabId, source, isNew,
-                });
-                bundler.transition(source);
-            } else {
-                dev.log("navigation", "window.no_tab", `window ${windowId} has no active tab (DevTools / popup)`, {
-                    windowId,
-                });
-            }
+            if (tabId !== visibleTabId) return;
+            visibleTabId = null;
+            startOffBrowserTimer();
         }
-        emitState();
-    }
-
-    function onWindowRemoved(windowId: number): void {
-        activeTabPerWindow.delete(windowId);
     }
 
     return {
         ingest,
         ingestSignal,
-        onTabActivated,
-        onWindowFocusChanged,
-        onWindowRemoved,
+        onVisibilityChanged,
         getSealed: bundler.getSealed,
         getEdges: graph.getEdges,
         drainSealed: bundler.drainSealed,

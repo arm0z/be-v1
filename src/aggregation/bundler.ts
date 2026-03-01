@@ -4,7 +4,7 @@ import { translate } from "./translate.ts";
 import { dev } from "../event/dev.ts";
 import type { createGraph } from "./graph.ts";
 
-const DWELL_MS = 500;
+const DWELL_MS = 1000;
 
 export function createBundler(graph: ReturnType<typeof createGraph>) {
     let activeSource: string | null = null;
@@ -161,7 +161,7 @@ export function createBundler(graph: ReturnType<typeof createGraph>) {
                 return;
             }
         }
-        openBundle.captures.push(stamped);
+        openBundle!.captures.push(stamped);
     }
 
     function getActiveSource(): string | null {

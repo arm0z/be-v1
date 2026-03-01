@@ -24,9 +24,7 @@ export type Edge = {
 export type Aggregator = {
     ingest(capture: Capture, tabId: string): void;
     ingestSignal(signal: Signal, tabId: string): void;
-    onTabActivated(tabId: string, windowId: number): void;
-    onWindowFocusChanged(windowId: number): void;
-    onWindowRemoved(windowId: number): void;
+    onVisibilityChanged(tabId: string, visible: boolean): void;
     getSealed(): Bundle[];
     getEdges(): Edge[];
     drainSealed(): Bundle[];

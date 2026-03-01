@@ -1,21 +1,9 @@
-import type { Capture, Signal } from "../event/types.ts";
+import type { Capture } from "../event/types.ts";
 import type { DevChannel, DevEntry } from "../event/dev.ts";
 import { dev } from "../event/dev.ts";
 import { createAggregator } from "../aggregation/index.ts";
 
 const aggregator = createAggregator();
-
-// Seed activeTabPerWindow for windows that already exist
-chrome.windows.getAll({ populate: false }, (windows) => {
-    for (const w of windows) {
-        if (w.id === undefined) continue;
-        chrome.tabs.query({ active: true, windowId: w.id }, (tabs) => {
-            if (tabs[0]?.id !== undefined) {
-                aggregator.onTabActivated(String(tabs[0].id), w.id!);
-            }
-        });
-    }
-});
 
 // ── Receive Captures from the Event Layer (port-based) ──────
 
@@ -52,7 +40,6 @@ chrome.windows.onCreated.addListener((window) => {
 });
 
 chrome.windows.onRemoved.addListener((windowId) => {
-    aggregator.onWindowRemoved(windowId);
     dev.log("tap", "window.closed", "window closed", { windowId });
 });
 
@@ -75,7 +62,17 @@ chrome.tabs.onCreated.addListener((tab) => {
         openerTabId: tab.openerTabId ? String(tab.openerTabId) : undefined,
     });
     aggregator.ingestSignal(
-        { type: "tab.created", timestamp: Date.now(), payload: { url: tab.url ?? "", title: tab.title ?? "", openerTabId: tab.openerTabId ? String(tab.openerTabId) : undefined } },
+        {
+            type: "tab.created",
+            timestamp: Date.now(),
+            payload: {
+                url: tab.url ?? "",
+                title: tab.title ?? "",
+                openerTabId: tab.openerTabId
+                    ? String(tab.openerTabId)
+                    : undefined,
+            },
+        },
         tabId,
     );
 });
@@ -87,7 +84,14 @@ chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
         isWindowClosing: removeInfo.isWindowClosing,
     });
     aggregator.ingestSignal(
-        { type: "tab.closed", timestamp: Date.now(), payload: { windowId: removeInfo.windowId, isWindowClosing: removeInfo.isWindowClosing } },
+        {
+            type: "tab.closed",
+            timestamp: Date.now(),
+            payload: {
+                windowId: removeInfo.windowId,
+                isWindowClosing: removeInfo.isWindowClosing,
+            },
+        },
         String(tabId),
     );
 });
@@ -125,7 +129,15 @@ chrome.webNavigation.onCompleted.addListener((details) => {
             transitionType: "",
         });
         aggregator.ingestSignal(
-            { type: "nav.completed", timestamp: Date.now(), payload: { url: details.url, title: tab?.title ?? "", transitionType: "" } },
+            {
+                type: "nav.completed",
+                timestamp: Date.now(),
+                payload: {
+                    url: details.url,
+                    title: tab?.title ?? "",
+                    transitionType: "",
+                },
+            },
             String(details.tabId),
         );
     });
@@ -139,7 +151,11 @@ chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
             title: tab?.title ?? "",
         });
         aggregator.ingestSignal(
-            { type: "nav.spa", timestamp: Date.now(), payload: { url: details.url, title: tab?.title ?? "" } },
+            {
+                type: "nav.spa",
+                timestamp: Date.now(),
+                payload: { url: details.url, title: tab?.title ?? "" },
+            },
             String(details.tabId),
         );
     });
@@ -152,7 +168,11 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             url: tab.url ?? "",
         });
         aggregator.ingestSignal(
-            { type: "nav.title_changed", timestamp: Date.now(), payload: { title: changeInfo.title, url: tab.url ?? "" } },
+            {
+                type: "nav.title_changed",
+                timestamp: Date.now(),
+                payload: { title: changeInfo.title, url: tab.url ?? "" },
+            },
             String(tabId),
         );
     }
@@ -163,7 +183,11 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             audible: changeInfo.audible,
         });
         aggregator.ingestSignal(
-            { type: "media.audio", timestamp: Date.now(), payload: { audible: changeInfo.audible } },
+            {
+                type: "media.audio",
+                timestamp: Date.now(),
+                payload: { audible: changeInfo.audible },
+            },
             String(tabId),
         );
     }
@@ -172,11 +196,15 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 // ── Layer 3: Attention ──────────────────────────────────────
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
-    dev.log("navigation", "chrome.tab_activated", `tab ${activeInfo.tabId} activated in window ${activeInfo.windowId}`, {
-        tabId: String(activeInfo.tabId),
-        windowId: activeInfo.windowId,
-    });
-    aggregator.onTabActivated(String(activeInfo.tabId), activeInfo.windowId);
+    dev.log(
+        "navigation",
+        "chrome.tab_activated",
+        `tab ${activeInfo.tabId} activated in window ${activeInfo.windowId}`,
+        {
+            tabId: String(activeInfo.tabId),
+            windowId: activeInfo.windowId,
+        },
+    );
     chrome.tabs.get(activeInfo.tabId, (tab) => {
         dev.log("tap", "attention.active", "tab activated", {
             active: true,
@@ -184,7 +212,15 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
             title: tab?.title ?? "",
         });
         aggregator.ingestSignal(
-            { type: "attention.active", timestamp: Date.now(), payload: { active: true, url: tab?.url ?? "", title: tab?.title ?? "" } },
+            {
+                type: "attention.active",
+                timestamp: Date.now(),
+                payload: {
+                    active: true,
+                    url: tab?.url ?? "",
+                    title: tab?.title ?? "",
+                },
+            },
             String(activeInfo.tabId),
         );
     });
@@ -194,33 +230,49 @@ let lastFocusedWindowId: number | null = null;
 
 chrome.windows.onFocusChanged.addListener((windowId) => {
     const prevWindowId = lastFocusedWindowId;
-    lastFocusedWindowId = windowId === chrome.windows.WINDOW_ID_NONE ? null : windowId;
+    lastFocusedWindowId =
+        windowId === chrome.windows.WINDOW_ID_NONE ? null : windowId;
 
-    dev.log("navigation", "chrome.window_focus", windowId === chrome.windows.WINDOW_ID_NONE
-        ? `browser lost focus (prev window ${prevWindowId})`
-        : `window ${windowId} focused (prev ${prevWindowId})`, {
-        windowId,
-        prevWindowId,
-        lostFocus: windowId === chrome.windows.WINDOW_ID_NONE,
-    });
-
-    aggregator.onWindowFocusChanged(windowId);
+    dev.log(
+        "navigation",
+        "chrome.window_focus",
+        windowId === chrome.windows.WINDOW_ID_NONE
+            ? `browser lost focus (prev window ${prevWindowId})`
+            : `window ${windowId} focused (prev ${prevWindowId})`,
+        {
+            windowId,
+            prevWindowId,
+            lostFocus: windowId === chrome.windows.WINDOW_ID_NONE,
+        },
+    );
 
     if (windowId === chrome.windows.WINDOW_ID_NONE) {
         if (prevWindowId !== null) {
-            chrome.tabs.query({ active: true, windowId: prevWindowId }, (tabs) => {
-                const tab = tabs[0];
-                const tabId = tab?.id !== undefined ? String(tab.id) : "unknown";
-                dev.log("tap", "attention.visible", "browser lost focus", {
-                    visible: false,
-                    url: tab?.url ?? "",
-                    title: tab?.title ?? "",
-                });
-                aggregator.ingestSignal(
-                    { type: "attention.visible", timestamp: Date.now(), payload: { visible: false, url: tab?.url ?? "", title: tab?.title ?? "" } },
-                    tabId,
-                );
-            });
+            chrome.tabs.query(
+                { active: true, windowId: prevWindowId },
+                (tabs) => {
+                    const tab = tabs[0];
+                    const tabId =
+                        tab?.id !== undefined ? String(tab.id) : "unknown";
+                    dev.log("tap", "attention.visible", "browser lost focus", {
+                        visible: false,
+                        url: tab?.url ?? "",
+                        title: tab?.title ?? "",
+                    });
+                    aggregator.ingestSignal(
+                        {
+                            type: "attention.visible",
+                            timestamp: Date.now(),
+                            payload: {
+                                visible: false,
+                                url: tab?.url ?? "",
+                                title: tab?.title ?? "",
+                            },
+                        },
+                        tabId,
+                    );
+                },
+            );
         }
     } else {
         chrome.tabs.query({ active: true, windowId }, (tabs) => {
@@ -231,7 +283,15 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
                 title: tab?.title ?? "",
             });
             aggregator.ingestSignal(
-                { type: "attention.visible", timestamp: Date.now(), payload: { visible: true, url: tab?.url ?? "", title: tab?.title ?? "" } },
+                {
+                    type: "attention.visible",
+                    timestamp: Date.now(),
+                    payload: {
+                        visible: true,
+                        url: tab?.url ?? "",
+                        title: tab?.title ?? "",
+                    },
+                },
                 String(tab?.id ?? "unknown"),
             );
         });
@@ -247,14 +307,28 @@ chrome.idle.onStateChanged.addListener((state) => {
 chrome.runtime.onMessage.addListener((msg, sender) => {
     if (msg.type !== "page:visibility") return;
     const tabId = String(sender.tab?.id ?? "unknown");
-    dev.log("tap", "attention.visible", msg.visible ? "page became visible" : "page became hidden", {
-        visible: msg.visible,
-        url: msg.url ?? "",
-        title: msg.title ?? "",
-        tabId,
-    });
+    dev.log(
+        "tap",
+        "attention.visible",
+        msg.visible ? "page became visible" : "page became hidden",
+        {
+            visible: msg.visible,
+            url: msg.url ?? "",
+            title: msg.title ?? "",
+            tabId,
+        },
+    );
+    aggregator.onVisibilityChanged(tabId, msg.visible);
     aggregator.ingestSignal(
-        { type: "attention.visible", timestamp: Date.now(), payload: { visible: msg.visible, url: msg.url ?? "", title: msg.title ?? "" } },
+        {
+            type: "attention.visible",
+            timestamp: Date.now(),
+            payload: {
+                visible: msg.visible,
+                url: msg.url ?? "",
+                title: msg.title ?? "",
+            },
+        },
         tabId,
     );
 });
@@ -274,7 +348,17 @@ chrome.downloads.onChanged.addListener((delta) => {
             state: delta.state!.current!,
         });
         aggregator.ingestSignal(
-            { type: "media.download", timestamp: Date.now(), payload: { filename: item.filename, url: item.url, mime: item.mime, size: item.totalBytes, state: delta.state!.current! } },
+            {
+                type: "media.download",
+                timestamp: Date.now(),
+                payload: {
+                    filename: item.filename,
+                    url: item.url,
+                    mime: item.mime,
+                    size: item.totalBytes,
+                    state: delta.state!.current!,
+                },
+            },
             "unknown",
         );
     });
