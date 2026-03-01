@@ -208,7 +208,7 @@ def index() -> tuple:
 <div class="flex items-center justify-between mb-4">
 <h1 class="text-xs sm:text-sm text-hg-muted font-normal">
   <span class="text-hg-blue">hourglass</span> / packets &mdash; {len(rows)} record(s)
-  {' <form method="POST" action="/clear" class="inline" onsubmit="return confirm(\'Delete all records?\')"><button class="ml-3 px-2.5 py-0.5 text-[11px] font-mono border border-hg-red rounded text-hg-red bg-transparent cursor-pointer hover:bg-hg-red hover:text-hg-bg">Clear all</button></form>' if rows else ''}
+  {' <form method="POST" action="/clear" class="inline" onsubmit="return confirm(\'Delete all records?\')"><button class="ml-3 px-2.5 py-0.5 text-[11px] font-mono border border-hg-red rounded text-hg-red bg-transparent cursor-pointer hover:bg-hg-red hover:text-hg-bg">Clear all</button></form>' if rows else ""}
 </h1>
 <button onclick="location.reload()" class="px-2.5 py-0.5 text-[11px] font-mono border border-hg-border rounded text-hg-muted bg-transparent cursor-pointer hover:text-hg-text hover:border-hg-blue">Reload</button>
 </div>

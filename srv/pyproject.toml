@@ -7,3 +7,9 @@ dependencies = ["flask>=3.0"]
 
 [project.scripts]
 srv = "main:run"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.4",
+    "ty>=0.0.19",
+]
