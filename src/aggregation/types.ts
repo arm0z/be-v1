@@ -86,6 +86,9 @@ export type Aggregator = {
     ingestSignal(signal: Signal, tabId: string): void;
     onVisibilityChanged(tabId: string, visible: boolean): void;
 
+    /** Register a callback for off-browser state changes. */
+    onOffBrowser(cb: (offBrowser: boolean) => void): void;
+
     getSealed(): Bundle[];
     drainSealed(): Bundle[];
 
@@ -96,4 +99,19 @@ export type Aggregator = {
 
     /** Seal the current open bundle (if any). Used by the packer before draining. */
     seal(): void;
+
+    /** Snapshot all in-memory state for checkpointing. */
+    snapshot(): Checkpoint;
+    /** Restore state from a checkpoint. */
+    restore(cp: Checkpoint): void;
+    /** Register a callback that fires after every bundle seal. */
+    onSeal(cb: () => void): void;
+};
+
+export type Checkpoint = {
+    activeSource: string | null;
+    openBundle: Bundle | null;
+    sealed: Bundle[];
+    transitions: Transition[];
+    savedAt: number;
 };

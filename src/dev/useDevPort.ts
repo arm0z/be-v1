@@ -1,13 +1,11 @@
-import type { DevChannel, DevEntry } from "@/event/dev";
+import type { DevChannel, DevEntry, DevFilter } from "@/event/dev";
 import { useEffect, useRef, useState } from "react";
 
-export type DevFilter = {
-    channels: Record<DevChannel, boolean>;
-    events: Record<string, boolean>;
-};
+export type { DevFilter };
 
 type DevMessage =
     | { type: "entry"; entry: DevEntry }
+    | { type: "replay"; entries: DevEntry[] }
     | { type: "filter"; filter: DevFilter };
 
 const MAX_ENTRIES = 500;
@@ -17,6 +15,10 @@ const RECONNECT_MS = 1_000;
  * Connects to the DevHub in the service worker via chrome.runtime.connect.
  * Automatically reconnects when the service worker restarts.
  * Returns live log entries and filter state with mutation helpers.
+ *
+ * Incoming entries are batched: individual "entry" messages accumulate in
+ * a pending buffer and flush once per microtask, avoiding O(n) array copies
+ * on every message.
  */
 export function useDevPort() {
     const [entries, setEntries] = useState<DevEntry[]>([]);
@@ -27,6 +29,28 @@ export function useDevPort() {
         let disposed = false;
         let timer: ReturnType<typeof setTimeout>;
 
+        // Batch incoming entries: accumulate during a microtask, flush once.
+        let pending: DevEntry[] = [];
+        let flushScheduled = false;
+
+        function scheduleBatchFlush() {
+            if (flushScheduled) return;
+            flushScheduled = true;
+            queueMicrotask(() => {
+                flushScheduled = false;
+                if (pending.length === 0) return;
+                const batch = pending;
+                pending = [];
+                setEntries((prev) => {
+                    const next =
+                        prev.length + batch.length <= MAX_ENTRIES
+                            ? [...prev, ...batch]
+                            : [...prev, ...batch].slice(-MAX_ENTRIES);
+                    return next;
+                });
+            });
+        }
+
         function connect() {
             if (disposed) return;
 
@@ -34,15 +58,18 @@ export function useDevPort() {
             portRef.current = port;
 
             port.onMessage.addListener((msg: DevMessage) => {
-                if (msg.type === "entry") {
-                    setEntries((prev) => {
-                        const next = [...prev, msg.entry];
-                        return next.length > MAX_ENTRIES
-                            ? next.slice(-MAX_ENTRIES)
-                            : next;
-                    });
-                }
-                if (msg.type === "filter") {
+                if (msg.type === "replay") {
+                    // Bulk replay on connect — single state update
+                    const bulk = msg.entries;
+                    setEntries(
+                        bulk.length > MAX_ENTRIES
+                            ? bulk.slice(-MAX_ENTRIES)
+                            : bulk,
+                    );
+                } else if (msg.type === "entry") {
+                    pending.push(msg.entry);
+                    scheduleBatchFlush();
+                } else if (msg.type === "filter") {
                     setFilter(msg.filter);
                 }
             });
@@ -61,16 +88,31 @@ export function useDevPort() {
         return () => {
             disposed = true;
             clearTimeout(timer);
+            pending = [];
             portRef.current?.disconnect();
             portRef.current = null;
         };
     }, []);
 
     function setChannelFilter(channels: Partial<Record<DevChannel, boolean>>) {
+        setFilter((prev) => {
+            if (!prev) return prev;
+            return {
+                ...prev,
+                channels: { ...prev.channels, ...channels },
+            };
+        });
         portRef.current?.postMessage({ type: "setChannelFilter", channels });
     }
 
     function setEventFilter(events: Partial<Record<string, boolean>>) {
+        setFilter((prev) => {
+            if (!prev) return prev;
+            return {
+                ...prev,
+                events: { ...prev.events, ...events },
+            };
+        });
         portRef.current?.postMessage({ type: "setEventFilter", events });
     }
 

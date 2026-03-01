@@ -185,8 +185,9 @@ export function tap(context = "root"): Tap {
                         scrollHeight: docEl.scrollHeight,
                         viewportHeight: window.innerHeight,
                         percent:
-                            docEl.scrollHeight > 0
-                                ? window.scrollY / docEl.scrollHeight
+                            docEl.scrollHeight > window.innerHeight
+                                ? window.scrollY /
+                                  (docEl.scrollHeight - window.innerHeight)
                                 : 0,
                     } satisfies InputScrollPayload,
                 };

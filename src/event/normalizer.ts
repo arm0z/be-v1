@@ -2,6 +2,45 @@ import type { Capture, Normalizer as NormalizerFn, Tap } from "./types.ts";
 
 import { dev } from "./dev.ts";
 
+// ── helpers ─────────────────────────────────────────────────────────
+
+const ACTION_KEYS = new Set([
+    "Enter",
+    "Backspace",
+    "Delete",
+    "Tab",
+    "Escape",
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "Home",
+    "End",
+    "PageUp",
+    "PageDown",
+]);
+
+const LONE_MODIFIERS = new Set([
+    "Control",
+    "Alt",
+    "Meta",
+    "Shift",
+    "CapsLock",
+    "NumLock",
+    "ScrollLock",
+]);
+
+function isMeaningfulKeystroke(
+    capture: Extract<Capture, { type: "input.keystroke" }>,
+): boolean {
+    const { key, repeat, modifiers } = capture.payload;
+    if (repeat) return false;
+    if (LONE_MODIFIERS.has(key)) return false;
+    if (ACTION_KEYS.has(key)) return true;
+    if (modifiers.ctrl || modifiers.alt || modifiers.meta) return true;
+    return false;
+}
+
 // ── individual normalizers ──────────────────────────────────────────
 
 const KEYSTROKE_FLUSH_MS = 1_000;
@@ -57,6 +96,9 @@ export const keystrokeNormalizer: NormalizerFn = (inner) => {
                     return;
                 }
                 flush();
+                if (isMeaningfulKeystroke(capture)) {
+                    sink(capture);
+                }
                 return;
             }
             if (capture.type === "input.composition") {

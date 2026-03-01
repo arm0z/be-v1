@@ -52,6 +52,15 @@ function translateEntry(c: BundleEntry): string | null {
         // ── captures ────────────────────────────────────────────
         case "input.keystroke_batch":
             return `typed "${c.payload.text}"`;
+        case "input.keystroke": {
+            const { key, modifiers } = c.payload;
+            let prefix = "";
+            if (modifiers.ctrl) prefix += "Ctrl+";
+            if (modifiers.alt) prefix += "Alt+";
+            if (modifiers.shift) prefix += "Shift+";
+            if (modifiers.meta) prefix += "Meta+";
+            return `pressed ${prefix}${key}`;
+        }
         case "input.click":
             return c.payload.target.href
                 ? `clicked "${c.payload.target.text ?? ""}" (${truncate(c.payload.target.href, 40)})`
@@ -99,8 +108,6 @@ function translateEntry(c: BundleEntry): string | null {
             return `opened new tab: "${c.payload.title}" (${truncate(c.payload.url, 40)})`;
         case "tab.closed":
             return `closed tab`;
-        case "attention.active":
-            return `switched to tab: "${c.payload.title}" (${truncate(c.payload.url, 40)})`;
         case "attention.visible":
             return c.payload.visible
                 ? `browser gained focus`

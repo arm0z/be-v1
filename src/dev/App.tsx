@@ -9,6 +9,7 @@ import {
     Box,
     ExternalLink,
     GitGraph,
+    HardDrive,
     Maximize2,
     Menu,
     Minimize2,
@@ -21,16 +22,18 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
-    useCallback,
-    useState,
-    type ReactElement,
-} from "react";
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { useCallback, useState, type ReactElement } from "react";
 import { DevContext, useDevContext } from "./DevContext";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { GraphView } from "./panels/GraphView";
 import { LogStream } from "./panels/LogStream";
 import { StateInspector } from "./panels/StateInspector";
+import { CheckpointInspector } from "./panels/CheckpointInspector";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useDevPort } from "./useDevPort";
 
@@ -38,23 +41,43 @@ import { useDevPort } from "./useDevPort";
 
 function GraphPanel(_props: IDockviewPanelProps) {
     const { entries, clear } = useDevContext();
-    return <GraphView entries={entries} onClear={clear} />;
+    return (
+        <ErrorBoundary>
+            <GraphView entries={entries} onClear={clear} />
+        </ErrorBoundary>
+    );
 }
 
 function LogsPanel(_props: IDockviewPanelProps) {
-    const { entries, filter, setEventFilter } = useDevContext();
+    const { entries, filter, setChannelFilter, setEventFilter } =
+        useDevContext();
     return (
-        <LogStream
-            entries={entries}
-            filter={filter}
-            setEventFilter={setEventFilter}
-        />
+        <ErrorBoundary>
+            <LogStream
+                entries={entries}
+                filter={filter}
+                setChannelFilter={setChannelFilter}
+                setEventFilter={setEventFilter}
+            />
+        </ErrorBoundary>
     );
 }
 
 function StatePanel(_props: IDockviewPanelProps) {
     const { entries, clear } = useDevContext();
-    return <StateInspector entries={entries} onClear={clear} />;
+    return (
+        <ErrorBoundary>
+            <StateInspector entries={entries} onClear={clear} />
+        </ErrorBoundary>
+    );
+}
+
+function CheckpointPanel(_props: IDockviewPanelProps) {
+    return (
+        <ErrorBoundary>
+            <CheckpointInspector />
+        </ErrorBoundary>
+    );
 }
 
 /* ── tab icon renderer ────────────────────────────────────────── */
@@ -63,6 +86,7 @@ const iconMap: Record<string, ReactElement> = {
     graph: <GitGraph className="mr-1.5 h-3.5 w-3.5" />,
     logs: <ScrollText className="mr-1.5 h-3.5 w-3.5" />,
     state: <Box className="mr-1.5 h-3.5 w-3.5" />,
+    checkpoint: <HardDrive className="mr-1.5 h-3.5 w-3.5" />,
 };
 
 function TabIcon({ api, params }: IDockviewPanelProps) {
@@ -92,6 +116,7 @@ const panelDefs = [
     { type: "graph", component: "graph", title: "Graph" },
     { type: "logs", component: "logs", title: "Log" },
     { type: "state", component: "state", title: "State" },
+    { type: "checkpoint", component: "checkpoint", title: "Checkpoint" },
 ] as const;
 
 let nextId = 0;
@@ -138,10 +163,7 @@ function RightActions({
         <div className="flex items-center gap-0.5 pr-1">
             <Tooltip>
                 <TooltipTrigger asChild>
-                    <button
-                        className={btnCls}
-                        onClick={toggleMaximize}
-                    >
+                    <button className={btnCls} onClick={toggleMaximize}>
                         {maximized ? (
                             <Minimize2 className="h-3.5 w-3.5 text-neutral-400" />
                         ) : (
@@ -149,7 +171,9 @@ function RightActions({
                         )}
                     </button>
                 </TooltipTrigger>
-                <TooltipContent>{maximized ? "Restore" : "Maximize"}</TooltipContent>
+                <TooltipContent>
+                    {maximized ? "Restore" : "Maximize"}
+                </TooltipContent>
             </Tooltip>
             <Tooltip>
                 <TooltipTrigger asChild>
@@ -172,7 +196,7 @@ function RightActions({
                             onClick={() => addPanel(def)}
                         >
                             {iconMap[def.type]}
-                            Add {def.title}
+                            {def.title}
                         </DropdownMenuItem>
                     ))}
                 </DropdownMenuContent>
@@ -187,6 +211,7 @@ const components = {
     graph: GraphPanel,
     logs: LogsPanel,
     state: StatePanel,
+    checkpoint: CheckpointPanel,
 };
 
 const tabComponents = {

@@ -1,5 +1,6 @@
 import type {
     Bundle,
+    Checkpoint,
     StampedCapture,
     StampedSignal,
     Transition,
@@ -44,6 +45,7 @@ export function createBundler() {
             },
         );
         openBundle = null;
+        sealCb?.();
     }
 
     function transition(to: string): void {
@@ -132,6 +134,47 @@ export function createBundler() {
         return result;
     }
 
+    let sealCb: (() => void) | null = null;
+
+    function onSeal(cb: () => void): void {
+        sealCb = cb;
+    }
+
+    function snapshot(): Checkpoint {
+        return {
+            activeSource,
+            openBundle: openBundle
+                ? {
+                      ...openBundle,
+                      captures: [...openBundle.captures],
+                  }
+                : null,
+            sealed: sealed.map((b) => ({ ...b, captures: [...b.captures] })),
+            transitions: [...transitions],
+            savedAt: Date.now(),
+        };
+    }
+
+    function restore(cp: Checkpoint): void {
+        activeSource = cp.activeSource;
+
+        for (const b of cp.sealed) {
+            sealed.push(b);
+        }
+        for (const t of cp.transitions) {
+            transitions.push(t);
+        }
+
+        if (cp.openBundle) {
+            const stale = cp.openBundle;
+            const lastCapture = stale.captures[stale.captures.length - 1];
+            stale.endedAt = lastCapture?.timestamp ?? cp.savedAt;
+            stale.text = translate(stale);
+            sealed.push(stale);
+        }
+        // Don't reopen a bundle — the next ingest will do that naturally.
+    }
+
     return {
         ingest,
         ingestSignal,
@@ -143,5 +186,8 @@ export function createBundler() {
         drainSealed,
         getTransitions,
         drainTransitions,
+        snapshot,
+        restore,
+        onSeal,
     };
 }

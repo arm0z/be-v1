@@ -1,11 +1,14 @@
 import type { Capture } from "../event/types.ts";
-import type { DevChannel, DevEntry } from "../event/dev.ts";
+import type { DevChannel, DevEntry, DevFilter } from "../event/dev.ts";
 import { dev } from "../event/dev.ts";
 import { createAggregator } from "../aggregation/index.ts";
 import { createPacker } from "../aggregation/packer.ts";
+import { createCheckpointer } from "../aggregation/checkpoint.ts";
+import { sync, drainRetryQueue } from "../sync/index.ts";
 
 const aggregator = createAggregator();
 const packer = createPacker(aggregator);
+const checkpointer = createCheckpointer(aggregator);
 
 // ── Receive Captures from the Event Layer (port-based) ──────
 
@@ -246,28 +249,73 @@ chrome.downloads.onChanged.addListener((delta) => {
     });
 });
 
-// ── Packer flush trigger ────────────────────────────────────
+// ── Sync triggers ───────────────────────────────────────────
 
-chrome.alarms.create("packer-flush", { periodInMinutes: 5 });
+const SYNC_PERIODIC_MINUTES = 120; // 2 hours
+const SYNC_IDLE_MINUTES = 10; // 10 minutes off-browser
+
+async function flushAndSync(): Promise<void> {
+    const packet = packer.flush();
+    if (!packet) return;
+    dev.log(
+        "sync",
+        "packet.ready",
+        `packet ${packet.id} ready (${packet.groups.length} groups)`,
+        {
+            packetId: packet.id,
+            groups: packet.groups.length,
+            edges: packet.edges.length,
+        },
+    );
+    await sync(packet);
+}
+
+// Periodic alarm — repeats every 2 hours
+chrome.alarms.create("sync-periodic", {
+    periodInMinutes: SYNC_PERIODIC_MINUTES,
+});
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name !== "packer-flush") return;
-    const packet = packer.flush();
-    if (packet) {
-        dev.log(
-            "sync",
-            "packet.ready",
-            `packet ${packet.id} ready (${packet.groups.length} groups)`,
-            {
-                packetId: packet.id,
-                groups: packet.groups.length,
-                edges: packet.edges.length,
-            },
-        );
-        // TODO: pass packet to syncing layer once implemented
-        // await sync(packet);
+    if (alarm.name === "sync-periodic" || alarm.name === "sync-idle") {
+        flushAndSync();
+        // Reset the periodic alarm after an idle flush so we
+        // don't get a redundant flush shortly after the user returns
+        if (alarm.name === "sync-idle") {
+            chrome.alarms.create("sync-periodic", {
+                periodInMinutes: SYNC_PERIODIC_MINUTES,
+            });
+        }
     }
 });
+
+// Off-browser idle alarm — managed by the aggregator callback
+aggregator.onOffBrowser((offBrowser) => {
+    if (offBrowser) {
+        chrome.alarms.create("sync-idle", {
+            delayInMinutes: SYNC_IDLE_MINUTES,
+        });
+        dev.log(
+            "sync",
+            "idle.armed",
+            `sync-idle alarm set (${SYNC_IDLE_MINUTES}m)`,
+        );
+    } else {
+        chrome.alarms.clear("sync-idle");
+        dev.log("sync", "idle.cancelled", "sync-idle alarm cancelled");
+    }
+});
+
+// Register seal callback for periodic checkpointing
+aggregator.onSeal(() => checkpointer.onBundleSealed());
+
+// Last-chance checkpoint + flush on suspend
+chrome.runtime.onSuspend.addListener(() => {
+    checkpointer.saveSuspend();
+    flushAndSync();
+});
+
+// Recovery on startup, then drain retry queue
+checkpointer.recover(() => flushAndSync()).then(() => drainRetryQueue());
 
 // ── DevHub (dev mode only) ──────────────────────────────────
 
@@ -276,13 +324,9 @@ if (import.meta.env.DEV) {
     const logs: DevEntry[] = [];
     const ports: Set<chrome.runtime.Port> = new Set();
 
-    type DevFilter = {
-        channels: Record<DevChannel, boolean>;
-        events: Record<string, boolean>;
-    };
-
     type DevMessage =
         | { type: "entry"; entry: DevEntry }
+        | { type: "replay"; entries: DevEntry[] }
         | { type: "filter"; filter: DevFilter };
 
     type DevCommand =
@@ -302,7 +346,7 @@ if (import.meta.env.DEV) {
             packer: true,
             navigation: true,
             sync: true,
-            persistence: true,
+            checkpoint: true,
         },
         events: {},
     };
@@ -340,10 +384,12 @@ if (import.meta.env.DEV) {
         ports.add(port);
         port.onDisconnect.addListener(() => ports.delete(port));
 
-        // replay buffered logs so the panel isn't empty on connect
-        for (const entry of logs) {
-            port.postMessage({ type: "entry", entry } satisfies DevMessage);
-        }
+        // replay buffered logs as a single bulk message so the panel
+        // handles it in one state update instead of 10,000 individual ones
+        port.postMessage({
+            type: "replay",
+            entries: logs.slice(),
+        } satisfies DevMessage);
 
         port.postMessage({
             type: "filter",

@@ -1,10 +1,10 @@
+import type { DevChannel, DevFilter } from "@/event/dev";
 import { Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import type { DevChannel } from "@/event/dev";
 
 /**
  * All Capture event types from types.ts, grouped by layer.
@@ -106,11 +106,6 @@ const EVENT_GROUPS: { label: string; events: string[] }[] = [
 ];
 
 export const ALL_EVENTS = EVENT_GROUPS.flatMap((g) => g.events);
-
-type DevFilter = {
-    channels: Record<DevChannel, boolean>;
-    events: Record<string, boolean>;
-};
 
 type Props = {
     filter: DevFilter | null;

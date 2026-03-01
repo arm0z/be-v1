@@ -16,6 +16,7 @@ export function createAggregator(): Aggregator {
     const OFF_BROWSER_SETTLE_MS = 1000;
 
     let visibleTabId: string | null = null;
+    let offBrowserCb: ((offBrowser: boolean) => void) | null = null;
 
     function emitState() {
         dev.log("aggregator", "state.snapshot", "state", {
@@ -129,12 +130,16 @@ export function createAggregator(): Aggregator {
                 "transitioning to off_browser",
             );
             bundler.transition(OFF_BROWSER);
+            offBrowserCb?.(true);
             emitState();
         }, OFF_BROWSER_SETTLE_MS);
     }
 
     function onVisibilityChanged(tabId: string, visible: boolean): void {
         if (visible) {
+            const wasOffBrowser =
+                offBrowserTimer !== null ||
+                bundler.getActiveSource() === OFF_BROWSER;
             if (offBrowserTimer !== null) {
                 clearTimeout(offBrowserTimer);
                 offBrowserTimer = null;
@@ -144,6 +149,7 @@ export function createAggregator(): Aggregator {
                     "off-browser timer cancelled",
                 );
             }
+            if (wasOffBrowser) offBrowserCb?.(false);
             visibleTabId = tabId;
             const source = resolveSource(tabId);
             if (source === bundler.getActiveSource()) return;
@@ -166,10 +172,16 @@ export function createAggregator(): Aggregator {
         ingest,
         ingestSignal,
         onVisibilityChanged,
+        onOffBrowser(cb: (offBrowser: boolean) => void) {
+            offBrowserCb = cb;
+        },
         getSealed: bundler.getSealed,
         drainSealed: bundler.drainSealed,
         getTransitions: bundler.getTransitions,
         drainTransitions: bundler.drainTransitions,
         seal: bundler.seal,
+        snapshot: bundler.snapshot,
+        restore: bundler.restore,
+        onSeal: bundler.onSeal,
     };
 }
