@@ -123,6 +123,24 @@ def escape_html(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def group_id_kind(gid: str) -> tuple[str, str]:
+    """Classify a group ID into (kind_label, css_color_class)."""
+    if gid.startswith("singleton:"):
+        return "singleton", "text-hg-red"
+    if gid.startswith("hub:"):
+        return "hub-chunk", "text-hg-purple"
+    return "community", "text-hg-green"
+
+
+def capture_type_counts(captures: list) -> dict[str, int]:
+    """Count captures by type prefix (e.g. input, nav, html)."""
+    counts: dict[str, int] = {}
+    for c in captures:
+        t = c.get("type", "unknown")
+        counts[t] = counts.get(t, 0) + 1
+    return counts
+
+
 # ── Routes ──────────────────────────────────────────────────────────
 
 
@@ -184,18 +202,41 @@ def index() -> tuple:
         span_start = fmt_ts_short(min(starts)) if starts else ""
         span_end = fmt_ts_short(max(ends)) if ends else ""
 
+        created_at = payload.get("createdAt", "")
+        created_time = fmt_ts_short(created_at) if created_at else ""
+
         received_full = r["received_at"]
         try:
             received_time = datetime.fromisoformat(received_full).strftime("%H:%M:%S")
         except (ValueError, TypeError):
             received_time = received_full
 
+        # Classify group IDs
+        singletons = sum(1 for gr in groups if gr.get("id", "").startswith("singleton:"))
+        communities = sum(
+            1
+            for gr in groups
+            if not gr.get("id", "").startswith("singleton:")
+            and not gr.get("id", "").startswith("hub:")
+        )
+        hubs = sum(1 for gr in groups if gr.get("id", "").startswith("hub:"))
+
+        group_breakdown = []
+        if communities:
+            group_breakdown.append(f'<span class="text-hg-green">{communities}c</span>')
+        if singletons:
+            group_breakdown.append(f'<span class="text-hg-red">{singletons}s</span>')
+        if hubs:
+            group_breakdown.append(f'<span class="text-hg-purple">{hubs}h</span>')
+        group_cell = " ".join(group_breakdown) if group_breakdown else str(len(groups))
+
         table_rows += f"""<tr class="hover:bg-hg-alt">
             <td class="hidden sm:table-cell" title="{received_full}">{received_time}</td>
             <td><a href="/{r["id"]}">{r["packet_id"][:8]}&hellip;</a></td>
-            <td>{len(groups)}</td>
+            <td>{group_cell}</td>
             <td>{bundle_count}</td>
             <td>{len(edges)}</td>
+            <td class="hidden md:table-cell">{created_time}</td>
             <td>{span_start} &ndash; {span_end}</td>
         </tr>"""
 
@@ -222,9 +263,9 @@ def index() -> tuple:
 </div>
 <table class="w-full border-collapse">
 <tr>
-  <th class="hidden sm:table-cell">Received</th><th>Packet</th><th>Groups</th><th>Bundles</th><th>Edges</th><th>Span</th>
+  <th class="hidden sm:table-cell">Received</th><th>Packet</th><th>Groups</th><th>Bundles</th><th>Edges</th><th class="hidden md:table-cell">Created</th><th>Span</th>
 </tr>
-{table_rows if table_rows else '<tr><td colspan="6" class="text-hg-dim p-10 text-center">No packets yet.</td></tr>'}
+{table_rows if table_rows else '<tr><td colspan="7" class="text-hg-dim p-10 text-center">No packets yet.</td></tr>'}
 </table>
 </body></html>"""
     return html, 200
@@ -308,6 +349,7 @@ def packet_detail(row_id: str) -> tuple:
         bundles = group.get("bundles", [])
         group_text = group.get("text", "")
         group_id = group.get("id", "")
+        gid_kind, gid_color = group_id_kind(group_id)
 
         # Bundle list
         bundle_items = ""
@@ -316,12 +358,30 @@ def packet_detail(row_id: str) -> tuple:
             b_started = fmt_ts_short(b.get("startedAt", 0))
             b_ended = fmt_ts_short(b.get("endedAt", 0)) if b.get("endedAt") else "open"
             b_text = b.get("text", "") or ""
-            b_captures = len(b.get("captures", []))
+            b_captures_list = b.get("captures", [])
+            b_captures = len(b_captures_list)
             b_tokens = estimate_tokens(b_text)
+            b_dwell_ms = (
+                (b.get("endedAt", 0) or 0) - b.get("startedAt", 0)
+                if b.get("startedAt")
+                else 0
+            )
+
+            type_counts = capture_type_counts(b_captures_list)
+            type_tags = " ".join(
+                f'<span class="text-hg-dim">{t}:{n}</span>'
+                for t, n in sorted(type_counts.items())
+            )
 
             bundle_body = ""
             if b_text.strip():
                 bundle_body = f'<pre class="whitespace-pre-wrap break-words text-xs text-hg-subtle max-h-[300px] overflow-y-auto px-4 py-2">{escape_html(b_text)}</pre>'
+
+            type_strip = (
+                f'<div class="px-4 py-1.5 text-[11px] flex flex-wrap gap-2 border-b border-hg-alt">{type_tags}</div>'
+                if type_tags
+                else ""
+            )
 
             bundle_items += (
                 f'<details class="border border-hg-border rounded mb-2">'
@@ -329,9 +389,11 @@ def packet_detail(row_id: str) -> tuple:
                 f'<span class="text-hg-subtle">#{bi}</span> '
                 f'<span class="text-hg-purple">{escape_html(b_source)}</span> '
                 f"{b_started} &ndash; {b_ended} "
+                f'<span class="text-hg-dim">({fmt_duration(b_dwell_ms)})</span> '
                 f'<span class="text-hg-dim">{b_captures} captures</span> '
                 f'<span class="text-hg-blue">~{b_tokens} tokens</span>'
                 f"</summary>"
+                f"{type_strip}"
                 f"{bundle_body}"
                 f"</details>"
             )
@@ -361,7 +423,8 @@ def packet_detail(row_id: str) -> tuple:
         <div class="group border border-hg-border rounded-md mb-5 overflow-hidden" id="group-{gi}">
             <div class="bg-hg-alt px-4 py-2.5 flex flex-wrap gap-4 items-center">
                 <span class="font-bold text-hg-green">Group {gi}</span>
-                <span class="text-hg-muted text-xs break-all">{escape_html(group_id[:16])}</span>
+                <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-hg-border {gid_color}">{gid_kind}</span>
+                <span class="text-hg-muted text-xs break-all" title="{escape_html(group_id)}">{escape_html(group_id[:32])}</span>
                 <span class="text-hg-muted text-xs">{len(bundles)} bundle(s) &middot; {len(tabs)} tab(s)</span>
                 <span class="text-hg-muted text-xs ml-auto">{fmt_duration(duration_ms)} &middot; {fmt_ts_short(t_start)} &ndash; {fmt_ts_short(t_end)}</span>
             </div>

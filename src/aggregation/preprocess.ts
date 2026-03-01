@@ -4,6 +4,7 @@ import { OFF_BROWSER } from "./types.ts";
 
 // ── Constants (defaults) ────────────────────────────────────
 
+const COLLAPSE_DWELL_MS = 5_000;
 const SENTINEL_PASSTHROUGH_MS = 2_000;
 const SENTINEL_BREAK_MS = 600_000;
 const TRANSIENT_DWELL_MS = 500;
@@ -17,6 +18,7 @@ const MAX_CHUNK_MS = 900_000;
 // ── Options ─────────────────────────────────────────────────
 
 export type PreprocessOptions = {
+    collapseDwellMs?: number;
     sentinelPassthroughMs?: number;
     sentinelBreakMs?: number;
     transientDwellMs?: number;
@@ -29,6 +31,7 @@ export type PreprocessOptions = {
 };
 
 type ResolvedOptions = {
+    collapseDwellMs: number;
     sentinelPassthroughMs: number;
     sentinelBreakMs: number;
     transientDwellMs: number;
@@ -42,6 +45,7 @@ type ResolvedOptions = {
 
 function resolveOptions(opts?: PreprocessOptions): ResolvedOptions {
     return {
+        collapseDwellMs: opts?.collapseDwellMs ?? COLLAPSE_DWELL_MS,
         sentinelPassthroughMs:
             opts?.sentinelPassthroughMs ?? SENTINEL_PASSTHROUGH_MS,
         sentinelBreakMs: opts?.sentinelBreakMs ?? SENTINEL_BREAK_MS,
@@ -53,6 +57,33 @@ function resolveOptions(opts?: PreprocessOptions): ResolvedOptions {
         minChunkMs: opts?.minChunkMs ?? MIN_CHUNK_MS,
         maxChunkMs: opts?.maxChunkMs ?? MAX_CHUNK_MS,
     };
+}
+
+// ── Stage 0: Collapse short-dwell midpoints ─────────────────
+
+function collapseShortDwells(
+    transitions: Transition[],
+    opts: ResolvedOptions,
+): Transition[] {
+    const result: Transition[] = [];
+    for (const t of transitions) {
+        const prev = result.length > 0 ? result[result.length - 1] : null;
+        const connected = prev && prev.to === t.from;
+        if (connected && t.dwellMs < opts.collapseDwellMs) {
+            // Short-lived midpoint — collapse: rewrite prev.to to skip it
+            if (prev.from !== t.to) prev.to = t.to;
+        } else if (
+            connected &&
+            t.from === OFF_BROWSER &&
+            t.ts - prev.ts < opts.collapseDwellMs
+        ) {
+            // Brief off_browser hop — dwellMs unreliable, use timestamp gap
+            if (prev.from !== t.to) prev.to = t.to;
+        } else {
+            result.push({ ...t });
+        }
+    }
+    return result;
 }
 
 // ── Stage 1: Off-browser sentinel splitting ────────────────
@@ -305,7 +336,8 @@ export function preprocess(
     options?: PreprocessOptions,
 ): PreprocessResult {
     const opts = resolveOptions(options);
-    const step1 = splitSentinels([...raw], opts);
+    const step0 = collapseShortDwells([...raw], opts);
+    const step1 = splitSentinels(step0, opts);
     const step2 = removeTransients(step1.transitions, opts);
     const hubSources = detectHubs(step2.transitions, opts);
     const step4 = chunkHubs(step2.transitions, hubSources, opts);

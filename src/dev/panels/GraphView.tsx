@@ -129,31 +129,6 @@ function convexHull(points: [number, number][]): [number, number][] {
     return lower.concat(upper);
 }
 
-const MIN_DWELL_MS = 5000;
-
-function collapseShortDwells(transitions: Transition[]): Transition[] {
-    const result: Transition[] = [];
-    for (const t of transitions) {
-        const prev = result.length > 0 ? result[result.length - 1] : null;
-        const connected = prev && prev.to === t.from;
-        if (connected && t.dwellMs < MIN_DWELL_MS) {
-            // Short-lived midpoint — collapse
-            if (prev.from !== t.to) prev.to = t.to;
-        } else if (
-            connected &&
-            t.from === "off_browser" &&
-            t.ts - prev.ts < MIN_DWELL_MS
-        ) {
-            // Brief off_browser hop during tab switch — dwellMs is unreliable
-            // for off_browser (no bundle opened), so use timestamp gap instead
-            if (prev.from !== t.to) prev.to = t.to;
-        } else {
-            result.push({ ...t });
-        }
-    }
-    return result;
-}
-
 function extractHostname(source: string): string {
     const at = source.indexOf("@");
     return at >= 0 ? source.slice(0, at) : source;
@@ -236,9 +211,7 @@ export function GraphView({ entries, onClear, onSend }: Props) {
                     sourceUrls?: Record<string, string>;
                 };
                 return {
-                    transitions: collapseShortDwells(
-                        snapshot.transitions ?? [],
-                    ),
+                    transitions: snapshot.transitions ?? [],
                     sourceUrls: snapshot.sourceUrls ?? {},
                 };
             }
@@ -330,9 +303,7 @@ export function GraphView({ entries, onClear, onSend }: Props) {
         processedRef.current = entries.length;
         if (!latestSnapshot) return;
 
-        const transitions = collapseShortDwells(
-            latestSnapshot.transitions ?? [],
-        );
+        const transitions = latestSnapshot.transitions ?? [];
 
         // Aggregate transitions into edges and collect node IDs
         const newEdges = new Map<string, Edge>();

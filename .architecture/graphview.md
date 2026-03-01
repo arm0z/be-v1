@@ -8,16 +8,16 @@ for grouping.
 
 ## File Map
 
-| File | Role |
-|------|------|
-| `src/dev/panels/GraphView.tsx` | Main graph visualization component (2226 lines) |
-| `src/dev/panels/EdgeTable.tsx` | Tabular transition list (173 lines) |
-| `src/aggregation/preprocess.ts` | 4-stage transition preprocessing pipeline |
-| `src/aggregation/directed-louvain.ts` | Graph construction + Louvain community detection |
-| `src/aggregation/packer.ts` | Packer — groups bundles into communities for sync |
-| `src/aggregation/types.ts` | Shared type definitions |
-| `src/aggregation/bundler.ts` | Bundles captures by source, logs transitions |
-| `src/aggregation/index.ts` | Aggregator factory (ingestion layer) |
+| File                                  | Role                                              |
+| ------------------------------------- | ------------------------------------------------- |
+| `src/dev/panels/GraphView.tsx`        | Main graph visualization component (2226 lines)   |
+| `src/dev/panels/EdgeTable.tsx`        | Tabular transition list (173 lines)               |
+| `src/aggregation/preprocess.ts`       | 4-stage transition preprocessing pipeline         |
+| `src/aggregation/directed-louvain.ts` | Graph construction + Louvain community detection  |
+| `src/aggregation/packer.ts`           | Packer — groups bundles into communities for sync |
+| `src/aggregation/types.ts`            | Shared type definitions                           |
+| `src/aggregation/bundler.ts`          | Bundles captures by source, logs transitions      |
+| `src/aggregation/index.ts`            | Aggregator factory (ingestion layer)              |
 
 ---
 
@@ -137,16 +137,16 @@ The graph view has two tabs and two view modes, creating four combinations:
 
 ### Tabs (data pipeline selection)
 
-| Tab | Pipeline |
-|-----|----------|
-| **Raw** (`GraphView.tsx:201`, `298-420`) | `collapseShortDwells()` → direct edge aggregation |
+| Tab                                              | Pipeline                                                                                |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| **Raw** (`GraphView.tsx:201`, `298-420`)         | `collapseShortDwells()` → direct edge aggregation                                       |
 | **Grouped** (`GraphView.tsx:261-292`, `422-477`) | `collapseShortDwells()` → `preprocess()` → `buildDirectedGraph()` → `directedLouvain()` |
 
 ### View modes (rendering selection)
 
-| Mode | Component |
-|------|-----------|
-| **Graph** | Canvas-based force-directed layout (`GraphView.tsx:534-877`) |
+| Mode      | Component                                                                      |
+| --------- | ------------------------------------------------------------------------------ |
+| **Graph** | Canvas-based force-directed layout (`GraphView.tsx:534-877`)                   |
 | **Edges** | `EdgeTable` component showing individual transitions (`EdgeTable.tsx:130-173`) |
 
 ---
@@ -268,7 +268,7 @@ The `useEffect` on `[activeTab, groupedResult, ...]`:
 
 The packer's `partitionIntoGroups()` function runs:
 
-```
+```text
 raw transitions → preprocess() → buildDirectedGraph() → directedLouvain() → assignBundles()
 ```
 
@@ -279,14 +279,14 @@ directly to `preprocess()`. The graph view applies `collapseShortDwells()`
 first, then feeds the result to the same `preprocess()` → `buildDirectedGraph()`
 → `directedLouvain()` chain.
 
-| Step | Graph View (Grouped) | Packer |
-|------|---------------------|--------|
-| 1. `collapseShortDwells()` | YES (`GraphView.tsx:239`) | **NO** |
-| 2. `preprocess()` | YES (`GraphView.tsx:267`) | YES (`packer.ts:83`) |
-| 3. `buildDirectedGraph()` | YES (`GraphView.tsx:276`) | YES (`packer.ts:100`) |
-| 4. `directedLouvain()` | YES (`GraphView.tsx:277`) | YES (`packer.ts:114`) |
-| 5. `assignBundles()` | NO (visualization only) | YES (`packer.ts:128`) |
-| 6. `graphToEdges()` | NO (reads graph.edges directly) | YES (`packer.ts:137`) |
+| Step                       | Graph View (Grouped)            | Packer                |
+| -------------------------- | ------------------------------- | --------------------- |
+| 1. `collapseShortDwells()` | YES (`GraphView.tsx:239`)       | **NO**                |
+| 2. `preprocess()`          | YES (`GraphView.tsx:267`)       | YES (`packer.ts:83`)  |
+| 3. `buildDirectedGraph()`  | YES (`GraphView.tsx:276`)       | YES (`packer.ts:100`) |
+| 4. `directedLouvain()`     | YES (`GraphView.tsx:277`)       | YES (`packer.ts:114`) |
+| 5. `assignBundles()`       | NO (visualization only)         | YES (`packer.ts:128`) |
+| 6. `graphToEdges()`        | NO (reads graph.edges directly) | YES (`packer.ts:137`) |
 
 ### Additional packer-only parameter differences
 
@@ -381,7 +381,7 @@ community:
 
 ### Default constants (`preprocess.ts:6-15`)
 
-```
+```text
 SENTINEL_PASSTHROUGH_MS = 2_000
 SENTINEL_BREAK_MS       = 600_000
 TRANSIENT_DWELL_MS      = 500
@@ -439,7 +439,7 @@ per pass:
 
 ### Constants (`directed-louvain.ts:3-6`)
 
-```
+```text
 DEFAULT_RESOLUTION      = 1.0
 MIN_IMPROVEMENT         = 1e-6
 MAX_PASSES              = 10
@@ -479,7 +479,7 @@ type LouvainResult = {
 
 ### Physics constants (`GraphView.tsx:62-68`)
 
-```
+```text
 DEFAULT_CHARGE_K    = 800       (repulsive force multiplier)
 DEFAULT_SPRING_K    = 0.02      (spring attractive force)
 DEFAULT_REST_LENGTH = 120       (equilibrium edge length in px)
@@ -612,15 +612,15 @@ count, node/edge counts, hub count, sentinel count, excluded source count.
 
 **Algorithm parameter sliders**:
 
-| Parameter | State var | Range | Default | Location |
-|-----------|-----------|-------|---------|----------|
-| Louvain resolution (γ) | `resolution` | 0.1-3.0 | 1.0 | `GraphView.tsx:1849-1876` |
-| Sentinel pass-through | `sentinelPassthroughMs` | 500-10000ms | 2000ms | `GraphView.tsx:1885-1912` |
-| Sentinel break boundary | `sentinelBreakMs` | 60s-30min | 10min | `GraphView.tsx:1913-1939` |
-| Transient dwell threshold | `transientDwellMs` | 100-2000ms | 500ms | `GraphView.tsx:1948-1971` |
-| Hub threshold | `hubThreshold` | 5-50% | 10% | `GraphView.tsx:1980-2007` |
-| Hub min sources | `hubMinSources` | 3-30 | 15 | `GraphView.tsx:2008-2031` |
-| Target per chunk | `targetPerChunk` | 2-10 | 4 | `GraphView.tsx:2032-2055` |
+| Parameter                 | State var               | Range       | Default | Location                  |
+| ------------------------- | ----------------------- | ----------- | ------- | ------------------------- |
+| Louvain resolution (γ)    | `resolution`            | 0.1-3.0     | 1.0     | `GraphView.tsx:1849-1876` |
+| Sentinel pass-through     | `sentinelPassthroughMs` | 500-10000ms | 2000ms  | `GraphView.tsx:1885-1912` |
+| Sentinel break boundary   | `sentinelBreakMs`       | 60s-30min   | 10min   | `GraphView.tsx:1913-1939` |
+| Transient dwell threshold | `transientDwellMs`      | 100-2000ms  | 500ms   | `GraphView.tsx:1948-1971` |
+| Hub threshold             | `hubThreshold`          | 5-50%       | 10%     | `GraphView.tsx:1980-2007` |
+| Hub min sources           | `hubMinSources`         | 3-30        | 15      | `GraphView.tsx:2008-2031` |
+| Target per chunk          | `targetPerChunk`        | 2-10        | 4       | `GraphView.tsx:2032-2055` |
 
 **Per-community breakdown** (`GraphView.tsx:2059-2129`): Lists each community
 with its color swatch, node count, and member IDs.
@@ -661,6 +661,7 @@ previous zoom/pan state.
 ### Copy graph text (`GraphView.tsx:1152-1209`)
 
 Copies a markdown-formatted summary to clipboard:
+
 - `# Navigation Graph`
 - `## Nodes` with URLs
 - `## Communities` (grouped mode) with member lists
@@ -668,49 +669,32 @@ Copies a markdown-formatted summary to clipboard:
 
 ---
 
-## 16. Summary: Graph View vs Packer Pipeline Comparison
+## 16. Summary: Graph View and Packer share the same pipeline
 
-```
-GRAPH VIEW (Grouped mode):
+`collapseShortDwells()` is now Stage 0 inside `preprocess()`. Both the graph
+view and the packer call `preprocess()`, so both get identical preprocessing.
 
-    state.snapshot.transitions
+```text
+BOTH GRAPH VIEW AND PACKER:
+
+    raw transitions
         │
         ▼
-    collapseShortDwells()          ← GRAPH-VIEW ONLY (5s threshold)
-        │
-        ▼
-    preprocess(opts)               ← with tunable UI parameters
+    preprocess(opts?)
+        ├─ Stage 0: collapseShortDwells()   (5s default, tunable via collapseDwellMs)
+        ├─ Stage 1: splitSentinels()
+        ├─ Stage 2: removeTransients()
+        ├─ Stage 3: detectHubs()
+        └─ Stage 4: chunkHubs()
         │
         ▼
     buildDirectedGraph()
         │
         ▼
-    directedLouvain(graph, γ)      ← with tunable resolution
+    directedLouvain(graph, γ?)
         │
         ▼
-    [render to canvas]
-
-
-PACKER (partitionIntoGroups):
-
-    bundler.transitions
-        │
-        ▼                          ← NO collapseShortDwells()
-    preprocess()                   ← with default parameters only
-        │
-        ▼
-    buildDirectedGraph()
-        │
-        ▼
-    directedLouvain(graph)         ← default resolution (1.0)
-        │
-        ▼
-    assignBundles()
-        │
-        ▼
-    [create Packet with Groups]
+    [graph view renders / packer assigns bundles]
 ```
 
-The packer lacks `collapseShortDwells()` and uses hardcoded defaults for all
-preprocessing parameters. The graph view applies `collapseShortDwells()` as a
-first pass and allows interactive tuning of all parameters via the side panel.
+The graph view passes tunable UI parameters; the packer uses defaults.
