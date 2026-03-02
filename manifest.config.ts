@@ -29,7 +29,7 @@ export default defineManifest({
         "downloads",
         "windows",
     ],
-    host_permissions: ["http://localhost:5000/*"],
+    host_permissions: ["<all_urls>"],
     background: {
         service_worker: "src/background/main.ts",
         type: "module",

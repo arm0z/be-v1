@@ -85,11 +85,7 @@ export default function App() {
                             <FormItem>
                                 <FormLabel>Key</FormLabel>
                                 <FormControl>
-                                    <Input
-                                        placeholder="your-key"
-                                        type="password"
-                                        {...field}
-                                    />
+                                    <Input placeholder="your-key" {...field} />
                                 </FormControl>
                                 <FormMessage />
                             </FormItem>

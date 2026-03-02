@@ -1,7 +1,7 @@
 {
-    "name": "be-v1",
+    "name": "hourglass-browser-extension",
     "type": "module",
-    "version": "1.0.0",
+    "version": "1.0.6",
     "private": true,
     "scripts": {
         "dev": "vite",
