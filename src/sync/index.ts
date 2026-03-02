@@ -1,29 +1,33 @@
 import type { Packet } from "../aggregation/types.ts";
 import { dev } from "../event/dev.ts";
 
-/* TODO: update to production URL */
-const SYNC_URL = import.meta.env.DEV
-    ? "http://localhost:5000/api/v1/extension/sync"
-    : "/api/v1/extension/sync";
 const RETRY_QUEUE_KEY = "retryQueue";
 const RETRY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const RETRY_MAX_ENTRIES = 50;
 
-// ── Sender ──────────────────────────────────────────────────
+// ── Sync config (hourglass:v0 — reads from popup form) ─────
 
-async function getAuthToken(): Promise<string> {
-    // TODO: implement real token retrieval
-    return "";
+type SyncConfig = { syncUrl: string; key: string };
+const SYNC_CONFIG_KEY = "syncConfig";
+
+async function getSyncConfig(): Promise<SyncConfig | null> {
+    const result = await chrome.storage.local.get(SYNC_CONFIG_KEY);
+    const cfg = result[SYNC_CONFIG_KEY] as SyncConfig | undefined;
+    if (!cfg?.syncUrl || !cfg?.key) return null;
+    return cfg;
 }
+
+// ── Sender ──────────────────────────────────────────────────
 
 /** Sends a packet to the server. Throws on failure. */
 async function sendPacket(packet: Packet): Promise<void> {
-    const token = await getAuthToken();
-    const res = await fetch(SYNC_URL, {
+    const cfg = await getSyncConfig();
+    if (!cfg) throw new Error("sync not configured");
+    const res = await fetch(cfg.syncUrl, {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${cfg.key}`,
         },
         body: JSON.stringify(packet),
     });
