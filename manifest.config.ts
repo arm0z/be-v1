@@ -29,7 +29,13 @@ export default defineManifest({
         "downloads",
         "windows",
     ],
-    host_permissions: ["<all_urls>"],
+    host_permissions: [
+        "https://*.hourglass.law/*",
+        "https://hourglass.bpmlaw.com/*",
+        "https://hourglass.pregodonnell.com/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*",
+    ],
     background: {
         service_worker: "src/background/main.ts",
         type: "module",
